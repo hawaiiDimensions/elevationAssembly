@@ -1,5 +1,5 @@
 
-rarefyOTUbySpecimenCount <- function(df, readsPerIndividual, nReps){
+rarefyOTUbySpecimenCount <- function(df, counts, readsPerIndividual, nReps){
   # Rarefies category by specimen counts. This function is designed to be iterated using `ddply`
   # Args:
   #   counts: dataframe containing specimen counts
