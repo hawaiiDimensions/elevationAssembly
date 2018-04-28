@@ -33,4 +33,4 @@ vignettes/*.pdf
 *.knit.md
 
 # OS files
-*.DS_Store
+.DS_Store
