@@ -1,4 +1,39 @@
 
+rarefyOTUbySpecimenCount <- function(df, readsPerIndividual, nReps){
+  # Rarefies category by specimen counts. This function is designed to be iterated using `ddply`
+  # Args:
+  #   counts: dataframe containing specimen counts
+  #   readsPerIndividual: number of reads per individual you would like to rarefy with
+  #   nReps: number of randomizations
+  # Returns:
+  #   
+  
+  # Test parameters
+  # readsPerIndividual = 10; nReps = 10
+  # df = subset(dataARFmelt, SizeCategory == "0to2" & Site_ID == "680")
+  # counts = specimenCounts
+  
+  # Extract the number of specimens for site and size category
+  nSpecimen <- subset(counts, Site_ID == unique(df$Site_ID) &
+                        SizeCategory == unique(df$SizeCategory))$Count
+  
+  rawReadAbund <- acast(df, X.OTU.ID~Site_SizeCategory, value.var = "nReads")
+  #rarefiedReadAbund <- list()
+  #for(i in 1:nReps){
+  #rarefiedReadAbund[[i]] <- rrarefy(rawReadAbund, sample = nSpecimen*readsPerIndividual) 
+  #}
+  rarefiedReadAbund <- rrarefy(rawReadAbund, sample = nSpecimen*readsPerIndividual) 
+  temp <- melt(rarefiedReadAbund,
+               value.name = "rarefiedReadAbund",
+               varnames = c("Site_SizeCategory", "X.OTU.ID"))
+  
+  res <- merge(df, temp, by = c("X.OTU.ID", "Site_SizeCategory"))
+  return(res)
+}
+
+
+
+
 
 distmatrix2df <- function(matrix){
     # Converts a matrix into a dataframe with no duplicate pairwise values
