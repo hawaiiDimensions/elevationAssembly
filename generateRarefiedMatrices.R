@@ -83,10 +83,15 @@ collapseOTUsList <- function(x, collapse.by){
   ddply(.data = x, .fun = collapseOTUs, .variables = c("Site_ID", collapse.by), .progress = "text")
 }
 
+# Collapse OTUs by OTU delimiters
 arfSpeciesID <- lapply(X = arf_rarefied, FUN = collapseOTUsList, collapse.by = "Species_ID")
 arfZOTUID <- lapply(X = arf_rarefied, FUN = collapseOTUsList, collapse.by = "zOTU_ID")
 arfOTUID <- lapply(X = arf_rarefied, FUN = collapseOTUsList, collapse.by = "OTU_ID")
-head(arf_rarefied[[1]])
+
+# Convert all to matrices
+arfSpeciesID <- lapply(arfSpeciesID, function(x){acast(x, Site_ID ~ Species_ID, value.var = "readAbund")})
+arfZOTUID <- lapply(arfZOTUID, function(x){acast(x, Site_ID ~ zOTU_ID, value.var = "readAbund")})
+arfOTUID <- lapply(arfOTUID, function(x){acast(x, Site_ID ~ OTU_ID, value.var = "readAbund")})
 
 ## EXPORT RAREFIED MATRICES
 saveRDS(arfSpeciesID, file = file.path(data.dir,"arfSpeciesIDdata.rds"))

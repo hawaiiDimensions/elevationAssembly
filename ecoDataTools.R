@@ -32,7 +32,20 @@ rarefyOTUbySpecimenCount <- function(df, counts, readsPerIndividual, nReps){
 }
 
 
-
+matchDist <- function(xdis, ydis, by = "x"){
+  # Matches and orders rows and columns
+  #xdis = testData_betadist
+  #ydis = climDist
+  xdist_mat <- as.matrix(xdis)
+  ydist_mat <- as.matrix(ydis)
+  if(by == "x"){
+    ydist_mat <- ydist_mat[rownames(xdist_mat), colnames(xdist_mat)]
+    return(as.dist(ydist_mat))
+  } else {
+    xdist_mat <- xdist_mat[rownames(ydist_mat), colnames(ydist_mat)]
+    return(as.dist(xdist_mat))
+  }
+}
 
 
 distmatrix2df <- function(matrix){
