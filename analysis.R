@@ -12,7 +12,7 @@ library(ggplot2); library(ggrepel)
 main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/"
 analysis.dir <- file.path(main.dir, "elevationAssemblyHawaii")
 data.dir <- file.path(main.dir, "data")
-fig.dir <- file.path(main.dir, "figures")
+fig.dir <- file.path(analysis.dir, "figures")
 source(file.path(analysis.dir, "ecoDataTools.R"))
 
 # Import otu data
@@ -100,18 +100,58 @@ climDist_steinbeck_scaled <- climDist_steinbeck_vector / sd(climDist_steinbeck_v
 
 mod1 <- lm(betaDist_steinbeck_vector ~ geogDist_steinbeck_scaled + climDist_steinbeck_scaled)
 summary(mod1)
-# maybe geographic distance may not be the best; since all the climatic variation is collinear with distance (that's why it's a transect!) What you would need is randomized sites that have varying geographic distance and climatic variation.
+# maybe geographic distance may not be the best; since all the climatic variation is collinear with distance (that's why it's an elevational transect!) What you would need is randomized sites that have varying geographic distance and climatic variation.
 
-## CLIMATE AGAINST TURNOVER
+## SPECIES ABUNDANCE WITH CLIMATE
+testData_melt <- melt(testData, value.name = "nReads", varnames = c("Site_ID", "Species_ID"))
+testData_melt <- merge(testData_melt, siteData[c("site.id", "site.1", "PC1", "PC2")], by.x = "Site_ID", by.y= "site.id")
 
+cleanData <- function(x, nSites){
+  # Keep only species that are found in more than equal the specified number of sites
+  if(sum(x$nReads > 0) >= nSites){
+    return(x)
+  } else {
+    return(NULL)
+  }
+}
 
+table(siteData$site.1) # 25 laupahoehoe sites; 39 steinbeck
+rtest <- ddply(.data = subset(testData_melt, site.1 == "Laupahoehoe"),
+               .fun = cleanData,
+               .variables = .(Species_ID),
+               nSites = 16)
 
+speciesAbundancePlot <- ggplot(data = rtest) +
+  geom_point(aes(y = log10(nReads+1), x = PC1, color = Species_ID)) +
+  geom_smooth(aes(y = log10(nReads+1), x = PC1, color = Species_ID), se = FALSE) +
+  facet_wrap(~Species_ID) +
+  theme(legend.position = "none")
+
+ggsave(speciesAbundancePlot,
+       filename = file.path(fig.dir, "speciesAbundancePlot_laupahoehoe.pdf"),
+       height = 10, width = 10)
+
+rtest2 <- ddply(.data = subset(testData_melt, site.1 == "Stainback"),
+               .fun = cleanData,
+               .variables = .(Species_ID),
+               nSites = 24)
+
+speciesAbundancePlot_steinbeck <- ggplot(data = rtest2) +
+  geom_point(aes(y = log10(nReads+1), x = PC1, color = Species_ID)) +
+  geom_smooth(aes(y = log10(nReads+1), x = PC1, color = Species_ID), se = FALSE) +
+  facet_wrap(~Species_ID) +
+  theme(legend.position = "none")
+
+ggsave(speciesAbundancePlot_steinbeck,
+       filename = file.path(fig.dir, "speciesAbundancePlot_steinbeck.pdf"),
+       height = 10, width = 10)
 
 
 ## Mantel tests;
 # * climate distance vs. turnover
 # * geographic distance vs. turnover
 
+# Import fasta (still need genetic distance from henrik)
 # Plot abundance against PC1, PC2 (for groups that are found in more than 5 sites, in each transect)
 # Plot abundance against PC1, PC2 for groups that are found in both sites, highlight by site
 # Find the mean? Niche distance? Schoener's D
