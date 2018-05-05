@@ -2,16 +2,13 @@
 # Author: Jun Ying Lim
 # Rarefies OTU tables for analysis
 
-## PACKAGES
-library(stringr)
-library(plyr)
-library(reshape2)
-library(picante)
-library(betapart)
-library(geosphere)
-library(vegan)
+## PACKAGES ============
+library(stringr); library(plyr); library(reshape2) # data manipulation tools
+library(vegan); library(betapart) # calculating beta diversity
+library(geosphere) # calculating geographic distances
+library(ggplot2); library(ggrepel)
 
-## IMPORT DATA
+## IMPORT DATA ============
 main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/"
 analysis.dir <- file.path(main.dir, "elevationAssemblyHawaii")
 data.dir <- file.path(main.dir, "data")
@@ -24,33 +21,45 @@ arfZOTUIDdata <- readRDS(file.path(data.dir, "arfZOTUIDdata.rds"))
 arfOTUIDdata <- readRDS(file.path(data.dir, "arfOTUIDdata.rds"))
 
 # Import site data
-siteData <- read.csv(file.path(data.dir, "clim.final.csv"))
+siteData <- read.csv(file.path(data.dir, "clim.final.csv"), stringsAsFactors = FALSE)
+siteData <- siteData[-grep(siteData$site.id, pattern = "BRG"),] # Exclude Rosie's samples
 
-## CALCULATE CLIMATE DISTANCE BETWEEN SITES
+laupahoehoe_siteIDs <- subset(siteData, site.1 == "Laupahoehoe")$site.id
+steinbeck_siteIDs <- subset(siteData, site.1 == "Stainback")$site.id
+
+## CALCULATE CLIMATE DISTANCE BETWEEN SITES ============
+# Principal coordinate analysis of bioclim variables
 rownames(siteData) <- siteData$site.id
-climDist <- dist(siteData[c("PC1", "PC2", "PC3")])
-
 climPCA <- prcomp(siteData[c(paste0("BIO", 1:19))], center = TRUE, scale. = TRUE)
-head(climPCA$x)
-head(climPCA$rotation)
-climPCA$sdev / sum(climPCA$sdev) * 100
-which.max(as.data.frame(climPCA$rotation)$PC1)
-as.data.frame(climPCA$rotation)$PC2
+climPCA$sdev / sum(climPCA$sdev) * 100 # variance explained
 
+siteData$PC1 <- climPCA$x[,1]
+siteData$PC2 <- climPCA$x[,2]
+siteData$PC3 <- climPCA$x[,3]
+
+# Plot sites in climate space
 climPCAcoord <- as.data.frame(climPCA$x)
 climPCAcoord$Site_ID <- rownames(climPCAcoord)
-library(ggplot2)
-ggplot(data = climPCAcoord) + geom_point(aes(y = PC1, x = PC2)) + geom_text_repel(aes(y = PC1, x = PC2, label = Site_ID))
-library(ggrepel)
-head(climPCAcoord)
+#ggplot(data = climPCAcoord) + geom_point(aes(y = PC1, x = PC2)) + geom_text_repel(aes(y = PC1, x = PC2, label = Site_ID))
+
+# Calculate climatic distance between sites
+climDist <- dist(siteData[c("PC1", "PC2", "PC3")])
 
 ## CALCULATE GEOGRAPHIC DISTANCE BETWEEN SITES
-siteData$latitude, siteData$longitude
-geogDist <- dist(siteData)
+nSite <- length(siteData$site.id)
+geogDist <- matrix(data = NA, nrow = nSite, ncol = nSite)
 
-distVincentyEllipsoid()
+for(i in 1:nSite){
+  for(j in 1:nSite){
+    geogDist[i,j] <- distVincentyEllipsoid(p1 = c(siteData$longitude[i], siteData$latitude[i]),
+                                           p2 = c(siteData$longitude[j], siteData$latitude[j]))
+  }
+}
+rownames(geogDist) <- siteData$site.id
+colnames(geogDist) <- siteData$site.id
 
 ## CALCULATE BETA DIVERSITY BETWEEN SITES
+# Try this out with one site first
 testData <- arfSpeciesIDdata[[1]]
 
 testData_PA <- ifelse(testData > 0, 1, 0)
@@ -59,8 +68,45 @@ testData_betadist <- testData_beta$beta.sor
 
 ## MANTEL TESTS
 climDist <- matchDist(testData_betadist, climDist)
-#geogDist <- matchDist(testData_betadist)
-mantel(climDist, testData_betadist)
+geogDist <- matchDist(testData_betadist, geogDist)
+
+climDist_steinbeck <- as.matrix(climDist)[steinbeck_siteIDs, steinbeck_siteIDs]
+climDist_steinbeck_vector <- as.vector(as.dist(climDist_steinbeck))
+geogDist_steinbeck <- as.matrix(geogDist)[steinbeck_siteIDs, steinbeck_siteIDs]
+geogDist_steinbeck_vector <- as.vector(as.dist(geogDist_steinbeck))
+
+climDist_laup <- as.matrix(climDist)[laupahoehoe_siteIDs, laupahoehoe_siteIDs]
+climDist_laup_vector <- as.vector(as.dist(climDist_laup))
+geogDist_laup <- as.matrix(climDist)[laupahoehoe_siteIDs, laupahoehoe_siteIDs]
+geogDist_laup_vector <- as.vector(as.dist(geogDist_laup))
+
+betaDist_steinbeck <- as.matrix(testData_betadist)[steinbeck_siteIDs, steinbeck_siteIDs]
+betaDist_steinbeck_vector <- as.vector(as.dist(betaDist_steinbeck))
+betaDist_laup <- as.matrix(testData_betadist)[laupahoehoe_siteIDs, laupahoehoe_siteIDs]
+betaDist_laup_vector <- as.vector(as.dist(betaDist_laup))
+
+plot(betaDist_steinbeck_vector ~ climDist_steinbeck_vector)
+plot(betaDist_steinbeck_vector ~ geogDist_steinbeck_vector)
+
+mantel(geogDist_steinbeck, betaDist_steinbeck)
+mantel(geogDist_laup, betaDist_laup)
+
+mantel(climDist_steinbeck, betaDist_steinbeck)
+mantel(climDist_laup, betaDist_laup)
+
+# Scaled to unit variance
+geogDist_steinbeck_scaled <- geogDist_steinbeck_vector / sd(geogDist_steinbeck_vector)
+climDist_steinbeck_scaled <- climDist_steinbeck_vector / sd(climDist_steinbeck_vector)
+
+mod1 <- lm(betaDist_steinbeck_vector ~ geogDist_steinbeck_scaled + climDist_steinbeck_scaled)
+summary(mod1)
+# maybe geographic distance may not be the best; since all the climatic variation is collinear with distance (that's why it's a transect!) What you would need is randomized sites that have varying geographic distance and climatic variation.
+
+## CLIMATE AGAINST TURNOVER
+
+
+
+
 
 ## Mantel tests;
 # * climate distance vs. turnover
