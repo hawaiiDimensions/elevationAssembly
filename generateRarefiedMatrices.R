@@ -27,44 +27,76 @@ names(specimenCounts) <- c("Site_ID", "Transect", "Island", "Method", "Year", "S
 ## DATA PREPARATION
 # Convert matrix into long-form data frame
 dataARFmelt <- melt(dataARF, id.vars = "X.OTU.ID", value.name = "nReads", variable.name = "Site_SizeCategory")
+dataMCOmelt <- melt(dataMCO, id.vars = "X.OTU.ID", value.name = "nReads", variable.name = "Site_SizeCategory")
+
+# Merge ARF and MCO together
+megaData <- ddply(merge(dataARFmelt, dataMCOmelt, all.x=TRUE), 
+      .(X.OTU.ID, Site_SizeCategory), summarise, nReads=sum(nReads), .progress = "text")
+saveRDS(megaData, file.path(data.dir, "combinedOTUdata.rds"))
 
 # Label OTUs by site and size categories
-temp <- str_split_fixed(dataARFmelt$Site_SizeCategory, pattern = "_", n = 3)
-dataARFmelt$Site_ID <- gsub(temp[,1], pattern = "X", replacement = "")
-dataARFmelt$SizeCategory <- temp[,2]
+temp <- str_split_fixed(megaData$Site_SizeCategory, pattern = "_", n = 3)
+megaData$Site_ID <- gsub(temp[,1], pattern = "X", replacement = "")
+megaData$SizeCategory <- temp[,2]
 
 # Label reads by various species delimitation methods
-temp <- str_split_fixed(dataARFmelt$X.OTU.ID, pattern = "_", n = 3)
-dataARFmelt$Species_ID <- temp[,1]
-dataARFmelt$zOTU_ID <- temp[,2]
-dataARFmelt$OTU_ID <- temp[,3]
+temp <- str_split_fixed(megaData$X.OTU.ID, pattern = "_", n = 3)
+megaData$Species_ID <- temp[,1]
+megaData$zOTU_ID <- temp[,2]
+megaData$OTU_ID <- temp[,3]
 
 ## RAREFY DATA BY SIZE CATEGORY AND SITE
 # Checking rarefaction procedure
 # 17 site by size category groupings have fewer reads than expected
 sumReads <- function(df){
   totalReads <- sum(df$nReads)
-  rarefiedReads <- subset(counts, Site_ID == unique(df$Site_ID) &
-                            SizeCategory == unique(df$SizeCategory))$Count * 10
+  rarefiedReads <- nrow(subset(df, nReads > 0)) * 20
+    
+  #subset(df, Site_ID == unique(df$Site_ID) &
+  #                          SizeCategory == unique(df$SizeCategory))$Count * 20
   return(data.frame(totalReads, rarefiedReads))
 }
-test <- ddply(.data = dataARFmelt, .var = .(SizeCategory, Site_ID), .fun = sumReads)
+
+# Determine the number of reads to rarefy from each site and size
+test <- ddply(.data = megaData, .var = .(SizeCategory, Site_ID), .fun = sumReads)
+
 test2 <- test[test$totalReads < test$rarefiedReads,]
 dim(test2)
 
 # Rarefy datasets
 # Samples where there are fewer reads than expected will be left unrarefied (only 17 site by size groupings)
 nreps <- 100
-arf_rarefied <- list()
+combined_rarefied <- list()
 
 for(i in 1:nreps){
-  arf_rarefied[[i]] <- ddply(.data = dataARFmelt,
+  combined_rarefied[[i]] <- ddply(.data = megaData,
                              .var = .(SizeCategory,Site_ID),
                              .fun = rarefyOTUbySpecimenCount,
                              counts = specimenCounts,
-                             readsPerIndividual = 10,
+                             readsPerIndividual = 20,
                              .progress = "text")
 }
+
+# Calculate haplotype diversity per site
+calcHaplotypeDiv <- function(df){
+  # Calculate haplotype diversity for each site
+  #df <- subset(combined_rarefied[[1]], Site_ID == 530 & Species_ID == "Species1")
+  temp <- subset(df, nReads > 0)
+  nHaplotype <- nrow(temp)
+  if(nHaplotype == 0 | nHaplotype == 1){
+    haplotypeDiversity <- 0
+  } else {
+    propAbund <- temp$nReads / sum(temp$nReads)
+    haplotypeDiversity <- (nHaplotype / (nHaplotype-1))* (1 - sum(propAbund^2))  
+  }
+  data.frame(haplotypeDiversity, nHaplotype)
+}
+
+test <- ddply(.data = combined_rarefied[[1]], .var = .(Species_ID, Site_ID), .fun = calcHaplotypeDiv, .progress = "text")
+test2 <- subset(test, nHaplotype > 0)
+
+saveRDS(test, file.path(data.dir, "haplotypeDiversity.rds"))
+
 
 # Collapse data into OTUs
 collapseOTUs <- function(df){

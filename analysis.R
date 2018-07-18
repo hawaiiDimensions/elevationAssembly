@@ -27,6 +27,12 @@ siteData <- siteData[-grep(siteData$site.id, pattern = "BRG"),] # Exclude Rosie'
 laupahoehoe_siteIDs <- subset(siteData, site.1 == "Laupahoehoe")$site.id
 steinbeck_siteIDs <- subset(siteData, site.1 == "Stainback")$site.id
 
+## CALCULATE HAPLOTYPE DIVERSITY
+test <- arfZOTUIDdata[[1]]
+test2 <- arfOTUIDdata[[1]]
+
+
+
 ## CALCULATE CLIMATE DISTANCE BETWEEN SITES ============
 # Principal coordinate analysis of bioclim variables
 rownames(siteData) <- siteData$site.id
@@ -160,6 +166,99 @@ ggsave(speciesAbundancePlot_steinbeck,
 # Remove collembolla
 # 
 
+# Calculate genetic distance
+library(ape)
+otuFasta <- read.dna(file.path(data.dir, "ARFMCOAll_Species_ZOTU_OTUID042018.fasta"), format = "fasta")
+test <- rownames(otuFasta)
+test <- gsub(pattern = "_size_.*", replacement = "", test)
+temp <- str_split_fixed(test, pattern = "_", n = 6)
+
+taxoRef <- as.data.frame(temp)
+
+collapseOtuRefs <- function(x){
+  #x = subset(taxoRef, V1 == "Species1008")
+  Order <- names(which.max(table(x$V4)))
+  Family <- names(which.max(table(x$V5)))
+  Genus <- names(which.max(table(x$V6)))
+  data.frame(Order, Family, Genus)
+}
+
+taxoRefSpecies <- ddply(.fun = collapseOtuRefs, .variables = .(V1), .data = taxoRef)
+taxoRefZOTUs <- ddply(.fun = collapseOtuRefs, .variables = .(V2), .data = taxoRef)
+taxoRefOTUs <- ddply(.fun = collapseOtuRefs, .variables = .(V3), .data = taxoRef)
+
+write.csv(taxoRefSpecies, file = file.path(data.dir, "taxoRefSpecies.csv"))
+write.csv(taxoRefZOTUs, file = file.path(data.dir, "taxoRefZOTUs.csv"))
+write.csv(taxoRefOTUs, file = file.path(data.dir, "taxoRefOTUs.csv"))
+
+## CALCULATE GENETIC DISTANCE BETWEEN OTUS ================
+
+geneticDist <- dist.dna(otuFasta, model = "K80", as.matrix = TRUE) # Genetic distances based on kimura 2-rate parameter
+geneticDist_df <- melt(geneticDist)
+
+geneticDist_df$Species1 <- str_split_fixed(geneticDist_df$Var1, n = 5, pattern = "_")[,1]
+geneticDist_df$Species2 <- str_split_fixed(geneticDist_df$Var2, n = 5, pattern = "_")[,1]
+
+geneticDist_df$ZOTU1 <- str_split_fixed(geneticDist_df$Var1, n = 5, pattern = "_")[,2]
+geneticDist_df$ZOTU2 <- str_split_fixed(geneticDist_df$Var2, n = 5, pattern = "_")[,2]
+
+geneticDist_df$OTU1 <- str_split_fixed(geneticDist_df$Var1, n = 5, pattern = "_")[,3]
+geneticDist_df$OTU2 <- str_split_fixed(geneticDist_df$Var2, n = 5, pattern = "_")[,3]
 
 
+geneticDist_species <- ddply(.data = geneticDist_df, .var = .(Species1, Species2), .fun = function(x){ geneticDist <- mean(x$value); data.frame(geneticDist) }, .progress = "text")
+geneticDist_ZOTU <- ddply(.data = geneticDist_df, .var = .(ZOTU1, ZOTU2), .fun = function(x){ geneticDist <- mean(x$value); data.frame(geneticDist) }, .progress = "text")
+geneticDist_OTU <- ddply(.data = geneticDist_df, .var = .(OTU1, OTU2), .fun = function(x){ geneticDist <- mean(x$value); data.frame(geneticDist) }, .progress = "text")
 
+saveRDS(geneticDist_species, file.path(data.dir, "geneticDist_species.rds"))
+saveRDS(geneticDist_ZOTU, file.path(data.dir, "geneticDist_ZOTU.rds"))
+saveRDS(geneticDist_OTU, file.path(data.dir, "geneticDist_OTU.rds"))
+
+length(unique(geneticDist_df$Species1))
+length(unique(geneticDist_df$ZOTU1))
+length(unique(geneticDist_df$OTU1))
+
+geneticDist_OTU <- readRDS(file.path(data.dir, "geneticDist_OTU.rds"))
+geneticDist_species <- readRDS(file.path(data.dir, "geneticDist_species.rds"))
+geneticDist_ZOTU <- readRDS(file.path(data.dir, "geneticDist_ZOTU.rds"))
+
+geneticDist_OTU_mat <- acast(geneticDist_OTU, OTU1 ~ OTU2, value.var = "geneticDist")
+geneticDist_species_mat <- acast(geneticDist_species, Species1 ~ Species2, value.var = "geneticDist")
+geneticDist_ZOTU_mat <- acast(geneticDist_ZOTU, ZOTU1 ~ ZOTU2, value.var = "geneticDist")
+
+saveRDS(geneticDist_species_mat, file.path(data.dir, "geneticDist_species_mat.rds"))
+saveRDS(geneticDist_OTU_mat, file.path(data.dir, "geneticDist_OTU_mat.rds"))
+saveRDS(geneticDist_ZOTU_mat, file.path(data.dir, "geneticDist_ZOTU_mat.rds"))
+
+## CALCULATE PAIRWISE SITE GENETIC DIVERSITY ================
+library(picante)
+
+geneticDist_ZOTU_mat <- readRDS(file.path(data.dir, "geneticDist_ZOTU_mat.rds"))
+arfZOTU_geneticDist_laup <- comdist(comm = arfZOTU_laup, dis = geneticDist_ZOTU_mat, abundance.weighted = FALSE)
+arfZOTU_geneticDist_stein <- comdist(comm = arfZOTU_stein, dis = geneticDist_ZOTU_mat, abundance.weighted = FALSE)
+
+saveRDS(arfZOTU_geneticDist_laup, file.path(data.dir, "arfZOTU_geneticDist_laup.rds"))
+saveRDS(arfZOTU_geneticDist_stein, file.path(data.dir, "arfZOTU_geneticDist_stein.rds"))
+
+geneticDist_OTU_mat <- readRDS(file.path(data.dir, "geneticDist_OTU_mat.rds"))
+arfOTU_geneticDist_laup <- comdist(comm = arfOTU_laup, dis = geneticDist_OTU_mat, abundance.weighted = FALSE)
+arfOTU_geneticDist_stein <- comdist(comm = arfOTU_stein, dis = geneticDist_OTU_mat, abundance.weighted = FALSE)
+
+saveRDS(arfOTU_geneticDist_laup, file.path(data.dir, "arfOTU_geneticDist_laup.rds"))
+saveRDS(arfOTU_geneticDist_stein, file.path(data.dir, "arfOTU_geneticDist_stein.rds"))
+
+# Subset data for testing
+write.csv(arfZOTUIDdata[[1]], file.path(data.dir, "arf_ZOTU_subset.csv"))
+write.csv(arfOTUIDdata[[1]], file.path(data.dir, "arf_OTU_subset.csv"))
+
+arfZOTU_laup <- arfZOTUIDdata[[1]][rownames(arfZOTUIDdata[[1]]) %in% laupahoehoe_siteIDs,]
+arfZOTU_stein <- arfZOTUIDdata[[1]][rownames(arfZOTUIDdata[[1]]) %in% steinbeck_siteIDs,]
+
+arfOTU_laup <- arfOTUIDdata[[1]][rownames(arfOTUIDdata[[1]]) %in% laupahoehoe_siteIDs,]
+arfOTU_stein <- arfOTUIDdata[[1]][rownames(arfOTUIDdata[[1]]) %in% steinbeck_siteIDs,]
+
+saveRDS(arfZOTU_laup, file.path(data.dir, "arfZOTU_laup.rds"))
+saveRDS(arfZOTU_stein, file.path(data.dir, "arfZOTU_stein.rds"))
+
+saveRDS(arfOTU_laup, file.path(data.dir, "arfOTU_laup.rds"))
+saveRDS(arfOTU_stein, file.path(data.dir, "arfOTU_stein.rds"))
