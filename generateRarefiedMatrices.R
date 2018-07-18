@@ -29,21 +29,21 @@ names(specimenCounts) <- c("Site_ID", "Transect", "Island", "Method", "Year", "S
 dataARFmelt <- melt(dataARF, id.vars = "X.OTU.ID", value.name = "nReads", variable.name = "Site_SizeCategory")
 dataMCOmelt <- melt(dataMCO, id.vars = "X.OTU.ID", value.name = "nReads", variable.name = "Site_SizeCategory")
 
-# Merge ARF and MCO together
-megaData <- ddply(merge(dataARFmelt, dataMCOmelt, all.x=TRUE), 
-      .(X.OTU.ID, Site_SizeCategory), summarise, nReads=sum(nReads), .progress = "text")
-saveRDS(megaData, file.path(data.dir, "combinedOTUdata.rds"))
+# Clean up data
+cleanOTUdata <- function(x){
+  # Label OTUs by site and size categories
+  temp <- str_split_fixed(x$Site_SizeCategory, pattern = "_", n = 3)
+  x$Site_ID <- gsub(temp[,1], pattern = "X", replacement = "")
+  x$SizeCategory <- temp[,2]
+  temp <- str_split_fixed(x$X.OTU.ID, pattern = "_", n = 3)
+  x$Species_ID <- temp[,1]
+  x$zOTU_ID <- temp[,2]
+  x$OTU_ID <- temp[,3]
+  return(x)
+}
 
-# Label OTUs by site and size categories
-temp <- str_split_fixed(megaData$Site_SizeCategory, pattern = "_", n = 3)
-megaData$Site_ID <- gsub(temp[,1], pattern = "X", replacement = "")
-megaData$SizeCategory <- temp[,2]
-
-# Label reads by various species delimitation methods
-temp <- str_split_fixed(megaData$X.OTU.ID, pattern = "_", n = 3)
-megaData$Species_ID <- temp[,1]
-megaData$zOTU_ID <- temp[,2]
-megaData$OTU_ID <- temp[,3]
+arfOTU <- cleanOTUdata(dataARFmelt)
+mcoOTU <- cleanOTUdata(dataMCOmelt)
 
 ## RAREFY DATA BY SIZE CATEGORY AND SITE
 # Checking rarefaction procedure
@@ -66,36 +66,54 @@ dim(test2)
 # Rarefy datasets
 # Samples where there are fewer reads than expected will be left unrarefied (only 17 site by size groupings)
 nreps <- 100
-combined_rarefied <- list()
+arf_rarefied <- list()
+mco_rarefied <- list()
 
 for(i in 1:nreps){
-  combined_rarefied[[i]] <- ddply(.data = megaData,
+  arf_rarefied[[i]] <- ddply(.data = arfOTU,
                              .var = .(SizeCategory,Site_ID),
                              .fun = rarefyOTUbySpecimenCount,
                              counts = specimenCounts,
-                             readsPerIndividual = 20,
+                             readsPerIndividual = 10,
+                             .progress = "text")
+  mco_rarefied[[i]] <- ddply(.data = mcoOTU,
+                             .var = .(SizeCategory,Site_ID),
+                             .fun = rarefyOTUbySpecimenCount,
+                             counts = specimenCounts,
+                             readsPerIndividual = 10,
                              .progress = "text")
 }
+
+# Combine data
+megaData <- ddply(merge(arf_rarefied[[1]],
+                        mco_rarefied[[1]], all.x=TRUE), 
+                  .(X.OTU.ID, Site_SizeCategory), summarise, rarefiedReadAbund=sum(rarefiedReadAbund), .progress = "text")
+megaData2 <- cleanOTUdata(megaData)
+head(megaData2)
+saveRDS(megaData2, file.path(data.dir, "combinedOTUdata.rds"))
 
 # Calculate haplotype diversity per site
 calcHaplotypeDiv <- function(df){
   # Calculate haplotype diversity for each site
   #df <- subset(combined_rarefied[[1]], Site_ID == 530 & Species_ID == "Species1")
-  temp <- subset(df, nReads > 0)
-  nHaplotype <- nrow(temp)
+  #df<- subset(megaData2, Species_ID == "Species100" & Site_ID == "541")
+  temp <- subset(df, rarefiedReadAbund > 0)
+  nHaplotype <- length(unique(temp$zOTU_ID))
   if(nHaplotype == 0 | nHaplotype == 1){
     haplotypeDiversity <- 0
   } else {
-    propAbund <- temp$nReads / sum(temp$nReads)
+    readCount <- tapply(temp$rarefiedReadAbund, INDEX = temp$zOTU_ID, FUN = sum)
+    propAbund <- readCount / sum(readCount)
     haplotypeDiversity <- (nHaplotype / (nHaplotype-1))* (1 - sum(propAbund^2))  
   }
   data.frame(haplotypeDiversity, nHaplotype)
 }
 
-test <- ddply(.data = combined_rarefied[[1]], .var = .(Species_ID, Site_ID), .fun = calcHaplotypeDiv, .progress = "text")
+test <- ddply(.data = megaData2, .var = .(Species_ID, Site_ID), .fun = calcHaplotypeDiv, .progress = "text")
 test2 <- subset(test, nHaplotype > 0)
 
-saveRDS(test, file.path(data.dir, "haplotypeDiversity.rds"))
+subset(megaData2, Species_ID == "Species100" & Site_ID == "541")
+saveRDS(test2, file.path(data.dir, "haplotypeDiversity.rds"))
 
 
 # Collapse data into OTUs
