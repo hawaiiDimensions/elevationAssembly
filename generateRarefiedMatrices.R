@@ -2,13 +2,13 @@
 # Author: Jun Ying Lim
 # Rarefies OTU tables for analysis
 
-## PACKAGES
+## PACKAGES ===============
 library(stringr)
 library(plyr)
 library(reshape2)
 library(picante)
 
-## IMPORT DATA
+## IMPORT DATA ===============
 main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/"
 analysis.dir <- file.path(main.dir, "elevationAssemblyHawaii")
 data.dir <- file.path(main.dir, "data")
@@ -24,7 +24,7 @@ dataMCO <- read.delim(file.path(data.dir, "otutabMCO.txt"), header = TRUE, strin
 specimenCounts <- read.delim(file.path(data.dir, "specimennumber.txt"), header = FALSE)
 names(specimenCounts) <- c("Site_ID", "Transect", "Island", "Method", "Year", "SizeCategory", "Count", "RarefiedReadAbund")
 
-## DATA PREPARATION
+## DATA PREPARATION ===============
 # Convert matrix into long-form data frame
 dataARFmelt <- melt(dataARF, id.vars = "X.OTU.ID", value.name = "nReads", variable.name = "Site_SizeCategory")
 dataMCOmelt <- melt(dataMCO, id.vars = "X.OTU.ID", value.name = "nReads", variable.name = "Site_SizeCategory")
@@ -45,26 +45,25 @@ cleanOTUdata <- function(x){
 arfOTU <- cleanOTUdata(dataARFmelt)
 mcoOTU <- cleanOTUdata(dataMCOmelt)
 
-## RAREFY DATA BY SIZE CATEGORY AND SITE
+## RAREFY DATA BY SIZE CATEGORY AND SITE ===============
 # Checking rarefaction procedure
 # 17 site by size category groupings have fewer reads than expected
-sumReads <- function(df){
-  totalReads <- sum(df$nReads)
-  rarefiedReads <- nrow(subset(df, nReads > 0)) * 20
-    
-  #subset(df, Site_ID == unique(df$Site_ID) &
-  #                          SizeCategory == unique(df$SizeCategory))$Count * 20
-  return(data.frame(totalReads, rarefiedReads))
-}
-
-# Determine the number of reads to rarefy from each site and size
-test <- ddply(.data = megaData, .var = .(SizeCategory, Site_ID), .fun = sumReads)
-
-test2 <- test[test$totalReads < test$rarefiedReads,]
-dim(test2)
+# sumReads <- function(df){
+#   totalReads <- sum(df$nReads)
+#   rarefiedReads <- nrow(subset(df, nReads > 0)) * 20
+#     
+#   #subset(df, Site_ID == unique(df$Site_ID) &
+#   #                          SizeCategory == unique(df$SizeCategory))$Count * 20
+#   return(data.frame(totalReads, rarefiedReads))
+# }
+# 
+# # Determine the number of reads to rarefy from each site and size
+# test <- ddply(.data = megaData, .var = .(SizeCategory, Site_ID), .fun = sumReads)
+# test2 <- test[test$totalReads < test$rarefiedReads,]
 
 # Rarefy datasets
 # Samples where there are fewer reads than expected will be left unrarefied (only 17 site by size groupings)
+# ARF and MCO are rarefied separately and then combined
 nreps <- 100
 arf_rarefied <- list()
 mco_rarefied <- list()
@@ -114,6 +113,54 @@ test2 <- subset(test, nHaplotype > 0)
 
 subset(megaData2, Species_ID == "Species100" & Site_ID == "541")
 saveRDS(test2, file.path(data.dir, "haplotypeDiversity.rds"))
+
+## GENERATE FILES FOR JAIRO
+# Date: 9th August
+
+megaData2 <- readRDS(file.path(data.dir, "combinedOTUdata.rds"))
+
+# Generate a zOTU table
+library(reshape2)
+
+masterZOTU <- acast(zOTU_ID~Site_ID, data = megaData2, fun.aggregate = sum, value.var = "rarefiedReadAbund")
+saveRDS(masterZOTU, file.path(data.dir, "masterZOTU.rds"))
+
+# Get taxonomic information from fasta file
+refTable <- megaData2[c("Species_ID", "zOTU_ID", "OTU_ID")]
+refTable <- unique(refTable)
+
+seqData <- read.dna(file.path(data.dir, "ARFMCOAll_Species_ZOTU_OTUID042018.fasta"), format = "fasta")
+taxonRaw <- rownames(seqData)
+taxonTab <- str_split_fixed(taxonRaw, pattern = "_", n = 5)
+taxonDF <- as.data.frame(taxonTab)
+
+test3 <- merge(refTable,  taxonDF[,1:4], by.x = c("Species_ID", "zOTU_ID", "OTU_ID"), by.y = c("V1", "V2", "V3"))
+saveRDS(test3, file.path(data.dir, "taxonData.rds"))
+
+# NOTE: tables will only contain zOTUs that have above zero
+
+# Create OTU and 
+
+taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
+
+speciesOTUraw <- list()
+speciesList <- unique(taxonData$Species_ID)
+for(i in 1:length(speciesList)){
+  zOTUList <- subset(taxonData, Species_ID == speciesList[i])$zOTU_ID
+  if(length(zOTUList) == 1){
+    speciesOTUraw[[i]] <- masterZOTU[rownames(masterZOTU) %in% zOTUList,]
+  } else {
+    speciesOTUraw[[i]] <- colSums(masterZOTU[rownames(masterZOTU) %in% zOTUList,]) 
+  }
+}
+
+speciesOTU <- do.call("rbind", speciesOTUraw)
+rownames(speciesOTU) <- speciesList
+
+
+
+
+
 
 
 # Collapse data into OTUs
