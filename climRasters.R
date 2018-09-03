@@ -70,4 +70,8 @@ saveRDS(annTempRaster_steinbCropped, file.path(data.dir, "annTemp_steinb.rds"))
 saveRDS(annPrecipRaster_laupCropped, file.path(data.dir, "annPrecip_laup.rds"))
 saveRDS(annPrecipRaster_steinbCropped, file.path(data.dir, "annPrecip_steinb.rds"))
 
+saveRDS(elev_laupCropped, file.path(data.dir, "elev_laup.rds"))
+saveRDS(elev_steinbCropped, file.path(data.dir, "elev_steinb.rds"))
+
+
 test <- readOGR(dsn = file.path(map.dir, "Haw_geo", "Haw_St_geo_20070426_region.shp"), layer = "Haw_St_geo_20070426_region")
