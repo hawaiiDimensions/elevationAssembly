@@ -141,52 +141,6 @@ saveRDS(test3, file.path(data.dir, "taxonData.rds"))
 # elevation and custom scripts
 source(file.path(analysis.dir, "metabarcodingTools.R"))
 taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
-
 masterTable <- readRDS(file.path(data.dir, "masterZOTU.rds"))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Collapse data into OTUs
-collapseOTUs <- function(df){
-  # Collapses rarefied read abundance data frame by values in target column
-  # Args:
-  #   df = data.frame object
-  #   collapse.by = string, name of column to collapse by
-  # Returns:
-  #   df = data.frame
-  readAbund <- sum(df$rarefiedReadAbund)
-  return(data.frame(readAbund))
-}
-
-collapseOTUsList <- function(x, collapse.by){
-  # Wrapper function to iterate ddply function across each rarefied data frame using lapply
-  ddply(.data = x, .fun = collapseOTUs, .variables = c("Site_ID", collapse.by), .progress = "text")
-}
-
-# Collapse OTUs by OTU delimiters
-arfSpeciesID <- lapply(X = arf_rarefied, FUN = collapseOTUsList, collapse.by = "Species_ID")
-arfZOTUID <- lapply(X = arf_rarefied, FUN = collapseOTUsList, collapse.by = "zOTU_ID")
-arfOTUID <- lapply(X = arf_rarefied, FUN = collapseOTUsList, collapse.by = "OTU_ID")
-
-# Convert all to matrices
-arfSpeciesID <- lapply(arfSpeciesID, function(x){acast(x, Site_ID ~ Species_ID, value.var = "readAbund")})
-arfZOTUID <- lapply(arfZOTUID, function(x){acast(x, Site_ID ~ zOTU_ID, value.var = "readAbund")})
-arfOTUID <- lapply(arfOTUID, function(x){acast(x, Site_ID ~ OTU_ID, value.var = "readAbund")})
-
-## EXPORT RAREFIED MATRICES
-saveRDS(arfSpeciesID, file = file.path(data.dir,"arfSpeciesIDdata.rds"))
-saveRDS(arfZOTUID, file = file.path(data.dir,"arfZOTUIDdata.rds"))
-saveRDS(arfOTUID, file = file.path(data.dir,"arfOTUIDdata.rds"))
+collapseOTU(x = masterTable, ref = taxonData, collapse.by = "OTU_ID", to.collapse = "zOTU_ID", subset.by = "V4")

@@ -39,7 +39,6 @@ collapseOTU <- function(x, ref, collapse.by, to.collapse, subset.by){
   res <- do.call("rbind", resList)
   rownames(res) <- collapseByList
   
-  subset.by = "V4"
   if(missing(subset.by)){
     return(res)
   } else{
