@@ -13,7 +13,7 @@ main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/"
 analysis.dir <- file.path(main.dir, "elevationAssemblyHawaii")
 data.dir <- file.path(main.dir, "data")
 fig.dir <- file.path(main.dir, "figures")
-source(file.path(analysis.dir, "ecoDataTools.R"))
+source(file.path(analysis.dir, "metabarcodingTools.R"))
 
 # Import site and otu tables
 siteData <- read.csv(file.path(data.dir, "clim.final.csv"))
@@ -115,8 +115,6 @@ subset(megaData2, Species_ID == "Species100" & Site_ID == "541")
 saveRDS(test2, file.path(data.dir, "haplotypeDiversity.rds"))
 
 ## GENERATE FILES FOR JAIRO
-# Date: 9th August
-
 megaData2 <- readRDS(file.path(data.dir, "combinedOTUdata.rds"))
 
 # Generate a zOTU table
@@ -139,23 +137,21 @@ saveRDS(test3, file.path(data.dir, "taxonData.rds"))
 
 # NOTE: tables will only contain zOTUs that have above zero
 
-# Create OTU and 
-
+# SUBSET THE DATAFRAME IN DIFFERENT WAYS ====================
+# elevation and custom scripts
+source(file.path(analysis.dir, "metabarcodingTools.R"))
 taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
 
-speciesOTUraw <- list()
-speciesList <- unique(taxonData$Species_ID)
-for(i in 1:length(speciesList)){
-  zOTUList <- subset(taxonData, Species_ID == speciesList[i])$zOTU_ID
-  if(length(zOTUList) == 1){
-    speciesOTUraw[[i]] <- masterZOTU[rownames(masterZOTU) %in% zOTUList,]
-  } else {
-    speciesOTUraw[[i]] <- colSums(masterZOTU[rownames(masterZOTU) %in% zOTUList,]) 
-  }
-}
+masterTable <- readRDS(file.path(data.dir, "masterZOTU.rds"))
 
-speciesOTU <- do.call("rbind", speciesOTUraw)
-rownames(speciesOTU) <- speciesList
+
+
+
+
+
+
+
+
 
 
 

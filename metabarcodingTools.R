@@ -1,4 +1,60 @@
 
+
+collapseOTU <- function(x, ref, collapse.by, to.collapse, subset.by){
+  # Arguments:
+  #     x = matrix, e.g., zotu table to be collapsed; sites as columns, otus as rows
+  #     ref = data.frame, reference table by which otu table
+  #     collapse.by = string, specifies column in ref data.frame IDs to collapse by in input matrix, x (e.g., species)
+  #     to.collapse = string, specifies column in ref data.frame IDs to be collapsed in input matrix, x (e.g., zOTU)
+  #     subset.by = string, specifies column in ref data.frame IDs to be subset. If specified, output will be a list of matrices
+  # Returns:
+  #    matrix, or list of matrices, that have been collapsed by specified parameters
+  
+  if(missing(collapse.by)){
+    stop("Missing argument: 'collapse.by' ")
+  } else if(!collapse.by %in% names(ref)){
+    stop("collapse.by not found in reference dataframe, ref")
+  }
+  if(missing(to.collapse)){
+    stop("Missing argument: 'to.collapse' ")
+  } else if(!to.collapse %in% names(ref)) {
+    stop("to.collapse not found in reference dataframe, ref")
+  }
+  if(!missing(subset.by)){
+    if(!subset.by %in% names(ref)){
+      stop("subset.by not found in reference dataframe, ref")
+    }
+  }
+  
+  collapseByList <- unique(ref[[collapse.by]])
+  resList <- list()
+  for(i in 1:length(collapseList)){
+    tocollapseList <- ref[ref[collapse.by]==collapseByList[i],][[to.collapse]]
+    if(length(tocollapseList) == 1){
+      resList[[i]] <- x[rownames(x) %in% tocollapseList,]
+    } else {
+      resList[[i]] <- colSums(x[rownames(x) %in% tocollapseList,])
+    }
+  }
+  res <- do.call("rbind", resList)
+  rownames(res) <- collapseByList
+  
+  subset.by = "V4"
+  if(missing(subset.by)){
+    return(res)
+  } else{
+    subsetres <- list()
+    subsetList <- unique(as.vector(ref[[subset.by]]))
+    for(j in 1:length(subsetList)){
+      subsetCollapsed <- unique(ref[ref[subset.by]==subsetList[j],][[collapse.by]])
+      subsetres[[subsetList[j]]] <- res[subsetCollapsed,]
+    }
+    return(subsetres)
+  }
+}
+
+
+
 rarefyOTUbySpecimenCount <- function(df, counts, readsPerIndividual, nReps){
   # Rarefies category by specimen counts. This function is designed to be iterated using `ddply`
   # Args:
