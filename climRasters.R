@@ -52,6 +52,13 @@ annPrecipRaster_cropped <- crop(annPrecipRaster, siteExtent)
 annPrecipRaster_laupCropped <- crop(annPrecipRaster, laupSiteExtent)
 annPrecipRaster_steinbCropped <- crop(annPrecipRaster, steinbSiteExtent)
 
+
+elev <- raster(file.path(map.dir, "ASTGTM2_N19W156", "ASTGTM2_N19W156_dem.tif"))
+elev_laupCropped <- crop(elev, laupSiteExtent)
+elev_steinbCropped <- crop(elev, steinbSiteExtent)
+# elev_cropped <- extract(x = elev, y = test)
+# plot(test$elevation, elev_cropped)
+
 ## EXPORT CROPPED RASTERS ============
 saveRDS(cloudFreqRaster_cropped, file.path(data.dir, "cloudFreqRaster_cropped.rds"))
 saveRDS(annTempRaster_cropped, file.path(data.dir, "annTempRaster_cropped.rds"))
