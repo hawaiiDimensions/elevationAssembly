@@ -28,7 +28,7 @@ collapseOTU <- function(x, ref, collapse.by, to.collapse, subset.by){
   
   collapseByList <- unique(ref[[collapse.by]])
   resList <- list()
-  for(i in 1:length(collapseList)){
+  for(i in 1:length(collapseByList)){
     tocollapseList <- ref[ref[collapse.by]==collapseByList[i],][[to.collapse]]
     if(length(tocollapseList) == 1){
       resList[[i]] <- x[rownames(x) %in% tocollapseList,]

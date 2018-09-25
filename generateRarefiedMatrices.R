@@ -143,4 +143,10 @@ source(file.path(analysis.dir, "metabarcodingTools.R"))
 taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
 masterTable <- readRDS(file.path(data.dir, "masterZOTU.rds"))
 
-collapseOTU(x = masterTable, ref = taxonData, collapse.by = "OTU_ID", to.collapse = "zOTU_ID", subset.by = "V4")
+OTUtab <- collapseOTU(x = masterTable, ref = taxonData, collapse.by = "OTU_ID", to.collapse = "zOTU_ID")#, subset.by = "V4")
+SPPtab <- collapseOTU(x = masterTable, ref = taxonData, collapse.by = "Species_ID", to.collapse = "zOTU_ID")#, subset.by = "V4")
+
+write.csv(masterTable, file.path(data.dir, "masterZOTU.csv"))
+write.csv(OTUtab, file.path(data.dir, "OTUtab.csv"))
+write.csv(SPPtab, file.path(data.dir, "SPPtab.csv"))
+write.csv(taxonData, file.path(data.dir, "taxonData.csv"))
