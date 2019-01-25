@@ -84,12 +84,77 @@ for(i in 1:nreps){
 }
 
 # Combine data
-megaData <- ddply(merge(arf_rarefied[[1]],
+combData <- ddply(merge(arf_rarefied[[1]],
                         mco_rarefied[[1]], all.x=TRUE), 
-                  .(X.OTU.ID, Site_SizeCategory), summarise, rarefiedReadAbund=sum(rarefiedReadAbund), .progress = "text")
-megaData2 <- cleanOTUdata(megaData)
-head(megaData2)
-saveRDS(megaData2, file.path(data.dir, "combinedOTUdata.rds"))
+                  .variables = .(X.OTU.ID, Site_SizeCategory),
+                  summarise, rarefiedReadAbund=sum(rarefiedReadAbund), .progress = "text")
+combData_clean <- cleanOTUdata(combData)
+head(combData_clean)
+saveRDS(combData_clean, file.path(data.dir, "combinedOTUdata.rds"))
+
+## CREATE TAXONOMIC REFERENCE TABLES ===============
+combData_clean <- readRDS(file.path(data.dir, "combinedOTUdata.rds"))
+
+# Create reference table mapping species ID, zOTU and OTU
+refTable <- combData_clean[c("Species_ID", "zOTU_ID", "OTU_ID")]
+refTable <- unique(refTable)
+
+# Import fasta file to get BLAST-derived taxonomies
+seqData <- read.dna(file.path(data.dir, "ARFMCOAll_Species_ZOTU_OTUID042018.fasta"), format = "fasta")
+taxonRaw <- rownames(seqData)
+taxonTab <- str_split_fixed(taxonRaw, pattern = "_", n = 5)
+taxonDF <- as.data.frame(taxonTab)
+
+# Create reference table mapping species ID, zOTU, OTU and taxonomic order
+refTableFinal <- merge(refTable,  taxonDF[,1:4], by.x = c("Species_ID", "zOTU_ID", "OTU_ID"), by.y = c("V1", "V2", "V3"))
+saveRDS(refTableFinal, file.path(data.dir, "taxonData.rds"))
+
+# NOTE: tables will only contain zOTUs that have above zero
+
+# SUBSET THE DATAFRAME ====================
+# Import taxonomic reference table
+source(file.path(analysis.dir, "metabarcodingTools.R"))
+taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
+
+# Create master zOTU matrix
+masterZOTU <- acast(zOTU_ID~Site_ID, data = combData_clean, fun.aggregate = sum, value.var = "rarefiedReadAbund")
+saveRDS(masterZOTU, file.path(data.dir, "masterZOTU.rds"))
+masterTable <- readRDS(file.path(data.dir, "masterZOTU.rds"))
+
+# Collapse ZOTU matrix into OTU and Species matrices
+OTUtab <- collapseOTU(x = masterTable, ref = taxonData, collapse.by = "OTU_ID", to.collapse = "zOTU_ID")#, subset.by = "V4")
+SPPtab <- collapseOTU(x = masterTable, ref = taxonData, collapse.by = "Species_ID", to.collapse = "zOTU_ID")#, subset.by = "V4")
+
+# Exclude the following orders
+toExclude <- subset(taxonData, V4 %in% c("Collembola", "Chilopoda", "Diplopoda", "Blattodea", "Isopoda", "Mantodea", "Phasmatodea"))
+
+masterTable_native <- masterTable[!rownames(masterTable) %in% toExclude$zOTU_ID, ]
+saveRDS(masterTable_native, file.path(data.dir, "zOTU_native.rds"))
+
+OTUtab_native <- OTUtab[!rownames(OTUtab) %in% toExclude$OTU_ID, ]
+saveRDS(OTUtab_native, file.path(data.dir, "OTU_native.rds"))
+SPPtab_native <- SPPtab[!rownames(SPPtab) %in% toExclude$Species_ID, ]
+saveRDS(SPPtab_native, file.path(data.dir, "SPP_native.rds"))
+
+orderList <- c("Araneae", "Hemiptera", "Lepidoptera", "Psocoptera", "Coleoptera", "Orthoptera")
+
+for(i in orderList){
+  targetTaxon <- subset(taxonData, V4 == i)
+  masterTable_subset <- masterTable_native[rownames(masterTable_native) %in% targetTaxon$zOTU_ID, ]
+  OTUtab_subset <- OTUtab_native[rownames(OTUtab_native) %in% targetTaxon$OTU_ID, ]
+  SPPtab_subset <- SPPtab_native[rownames(SPPtab_native) %in% targetTaxon$Species_ID, ]
+  saveRDS(masterTable_subset, file.path(data.dir, paste0("zOTU_", i, ".rds")))
+  saveRDS(OTUtab_subset, file.path(data.dir, paste0("OTU_", i, ".rds")))
+  saveRDS(SPPtab_subset, file.path(data.dir, paste0("SPP_", i, ".rds")))
+}
+
+# write.csv(masterTable, file.path(data.dir, "masterZOTU.csv"))
+# write.csv(OTUtab, file.path(data.dir, "OTUtab.csv"))
+# write.csv(SPPtab, file.path(data.dir, "SPPtab.csv"))
+# write.csv(taxonData, file.path(data.dir, "taxonData.csv"))
+
+# 
+
 
 # Calculate haplotype diversity per site
 calcHaplotypeDiv <- function(df){
@@ -108,45 +173,49 @@ calcHaplotypeDiv <- function(df){
   data.frame(haplotypeDiversity, nHaplotype)
 }
 
-test <- ddply(.data = megaData2, .var = .(Species_ID, Site_ID), .fun = calcHaplotypeDiv, .progress = "text")
-test2 <- subset(test, nHaplotype > 0)
+haplotDivBySiteByOTU <- ddply(.data = subset(combData_clean, (!zOTU_ID %in% toExclude$zOTU_ID)), .var = .(OTU_ID, Site_ID), .fun = calcHaplotypeDiv, .progress = "text")
 
-subset(megaData2, Species_ID == "Species100" & Site_ID == "541")
-saveRDS(test2, file.path(data.dir, "haplotypeDiversity.rds"))
+saveRDS(haplotDivBySiteByOTU, file.path(data.dir, "haplotDivBySiteByOTU.rds"))
 
-## GENERATE FILES FOR JAIRO
-megaData2 <- readRDS(file.path(data.dir, "combinedOTUdata.rds"))
+ReadAbundanceBySiteByOTU <- ddply(.data = subset(combData_clean, (!zOTU_ID %in% toExclude$zOTU_ID)), .var = .(OTU_ID, Site_ID), .fun = summarize, siteReadAbundance = sum(rarefiedReadAbund), .progress = "text")
 
-# Generate a zOTU table
-library(reshape2)
+saveRDS(ReadAbundanceBySiteByOTU, file.path(data.dir, "ReadAbundanceBySiteByOTU.rds"))
 
-masterZOTU <- acast(zOTU_ID~Site_ID, data = megaData2, fun.aggregate = sum, value.var = "rarefiedReadAbund")
-saveRDS(masterZOTU, file.path(data.dir, "masterZOTU.rds"))
+## PRELIMINARY PLOTS
+ReadAbundanceBySiteByOTU_Final <- merge(ReadAbundanceBySiteByOTU, taxonData, by = "OTU_ID")
 
-# Get taxonomic information from fasta file
-refTable <- megaData2[c("Species_ID", "zOTU_ID", "OTU_ID")]
-refTable <- unique(refTable)
+temp <- tapply(ReadAbundanceBySiteByOTU_Final$siteReadAbundance, ReadAbundanceBySiteByOTU_Final$OTU_ID, FUN = max)
+temp2 <- data.frame("OTU_ID" = names(temp), "maxAbund" = as.vector(temp))
+ReadAbundanceBySiteByOTU_Final2 <- merge(ReadAbundanceBySiteByOTU_Final, temp2, by = "OTU_ID")
 
-seqData <- read.dna(file.path(data.dir, "ARFMCOAll_Species_ZOTU_OTUID042018.fasta"), format = "fasta")
-taxonRaw <- rownames(seqData)
-taxonTab <- str_split_fixed(taxonRaw, pattern = "_", n = 5)
-taxonDF <- as.data.frame(taxonTab)
+z <- merge(ReadAbundanceBySiteByOTU_Final2, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
+z$relAbund <- z$siteReadAbundance/ z$maxAbund
+z2 <- ggplot(aes(x = elevation, y = relAbund), data = subset(z, maxAbund > 1000)) + geom_point() + facet_wrap(vars(OTU_ID,site)) + geom_smooth(method = "loess")
+ggsave("~/Desktop/readAbundElev.pdf", z2, width = 20, height = 20)
 
-test3 <- merge(refTable,  taxonDF[,1:4], by.x = c("Species_ID", "zOTU_ID", "OTU_ID"), by.y = c("V1", "V2", "V3"))
-saveRDS(test3, file.path(data.dir, "taxonData.rds"))
 
-# NOTE: tables will only contain zOTUs that have above zero
 
-# SUBSET THE DATAFRAME IN DIFFERENT WAYS ====================
-# elevation and custom scripts
-source(file.path(analysis.dir, "metabarcodingTools.R"))
-taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
-masterTable <- readRDS(file.path(data.dir, "masterZOTU.rds"))
+z3 <- merge(haplotDivBySiteByOTU, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
+z4 <- subset(z3, nHaplotype > 0)
+z4 <- merge(z4, taxonData)
+#z5 <- ddply(.data = z4, .variables = .(Site_ID), summarize, meanHaplo = mean(haplotypeDiversity))
+#z6 <- merge(z4, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
 
-OTUtab <- collapseOTU(x = masterTable, ref = taxonData, collapse.by = "OTU_ID", to.collapse = "zOTU_ID")#, subset.by = "V4")
-SPPtab <- collapseOTU(x = masterTable, ref = taxonData, collapse.by = "Species_ID", to.collapse = "zOTU_ID")#, subset.by = "V4")
+ggplot(aes(y = haplotypeDiversity, x = elevation, color = OTU_ID), data = z4) + facet_wrap(~site) + theme(legend.position = "none") + geom_smooth(method="glm", se = FALSE, alpha =0.5)
+library(lme4)
+mod <- glmer(haplotypeDiversity ~ elevation + (1|OTU_ID) + (elevation|OTU_ID), data = z4, family = "binomial")
+summary(mod)
+library(ggplot2)
 
-write.csv(masterTable, file.path(data.dir, "masterZOTU.csv"))
-write.csv(OTUtab, file.path(data.dir, "OTUtab.csv"))
-write.csv(SPPtab, file.path(data.dir, "SPPtab.csv"))
-write.csv(taxonData, file.path(data.dir, "taxonData.csv"))
+install.packages("mcmcglmm")
+
+library(nimble)
+haploCode <- nimbleCode({
+  for(i in 1:OTU_ID){
+    
+  }
+})
+table(subset(z4, site == "Laupahoehoe")$OTU_ID)
+
+subset(z4, site == "Laupahoehoe" & OTU_ID == "OTU90")
+# There are 25 laupahoehoe and 39 Stainback sites
