@@ -4,7 +4,7 @@
 
 ## PACKAGES ============
 library(stringr); library(plyr); library(reshape2) # data manipulation tools
-library(vegan); library(betapart) # calculating beta diversity
+library(vegan) # calculating beta diversity
 library(geosphere) # calculating geographic distances
 library(ggplot2); library(ggrepel)
 
@@ -13,12 +13,7 @@ main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/"
 analysis.dir <- file.path(main.dir, "elevationAssemblyHawaii")
 data.dir <- file.path(main.dir, "data")
 fig.dir <- file.path(analysis.dir, "figures")
-source(file.path(analysis.dir, "ecoDataTools.R"))
-
-# Import otu data
-arfSpeciesIDdata <- readRDS(file.path(data.dir, "arfSpeciesIDdata.rds"))
-arfZOTUIDdata <- readRDS(file.path(data.dir, "arfZOTUIDdata.rds"))
-arfOTUIDdata <- readRDS(file.path(data.dir, "arfOTUIDdata.rds"))
+source(file.path(analysis.dir, "metabarcodingTools.R"))
 
 # Import site data
 siteData <- read.csv(file.path(data.dir, "clim.final.csv"), stringsAsFactors = FALSE)
@@ -27,238 +22,116 @@ siteData <- siteData[-grep(siteData$site.id, pattern = "BRG"),] # Exclude Rosie'
 laupahoehoe_siteIDs <- subset(siteData, site.1 == "Laupahoehoe")$site.id
 steinbeck_siteIDs <- subset(siteData, site.1 == "Stainback")$site.id
 
-## CALCULATE HAPLOTYPE DIVERSITY
-test <- arfZOTUIDdata[[1]]
-test2 <- arfOTUIDdata[[1]]
+# Import otu data
+zOTU_mat <- readRDS(file.path(data.dir, "zOTU_native.rds"))
+OTU_mat <- readRDS(file.path(data.dir, "OTU_native.rds"))
+SPP_mat <- readRDS(file.path(data.dir, "SPP_native.rds"))
 
+# Import taxonmic reference
+taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
 
+## ABUNDANCE PATTERNS =========
+aranaeae_ZOTU <- subset(taxonData, V4 == "Araneae")$zOTU_ID
 
-## CALCULATE CLIMATE DISTANCE BETWEEN SITES ============
-# Principal coordinate analysis of bioclim variables
-rownames(siteData) <- siteData$site.id
-climPCA <- prcomp(siteData[c(paste0("BIO", 1:19))], center = TRUE, scale. = TRUE)
-climPCA$sdev / sum(climPCA$sdev) * 100 # variance explained
+OTU_df <- melt(OTU_mat, value.name = "rarefiedReadAbund", varnames = c("OTU_ID", "site.id"))
+OTU_df2 <- merge(x = OTU_df, y = taxonData[c("OTU_ID", "V4")], by = "OTU_ID", all.x = TRUE)
 
-siteData$PC1 <- climPCA$x[,1]
-siteData$PC2 <- climPCA$x[,2]
-siteData$PC3 <- climPCA$x[,3]
+# Remove duplicates
+OTU_df2 <- OTU_df2[!duplicated(OTU_df2),]
+OTU_df3 <- merge(x = OTU_df2, y = siteData[c("site.id", "rf_ann", "t_ann", "site")], by = "site.id")
 
-# Plot sites in climate space
-climPCAcoord <- as.data.frame(climPCA$x)
-climPCAcoord$Site_ID <- rownames(climPCAcoord)
-#ggplot(data = climPCAcoord) + geom_point(aes(y = PC1, x = PC2)) + geom_text_repel(aes(y = PC1, x = PC2, label = Site_ID))
-
-# Calculate climatic distance between sites
-climDist <- dist(siteData[c("PC1", "PC2", "PC3")])
-
-## CALCULATE GEOGRAPHIC DISTANCE BETWEEN SITES
-nSite <- length(siteData$site.id)
-geogDist <- matrix(data = NA, nrow = nSite, ncol = nSite)
-
-for(i in 1:nSite){
-  for(j in 1:nSite){
-    geogDist[i,j] <- distVincentyEllipsoid(p1 = c(siteData$longitude[i], siteData$latitude[i]),
-                                           p2 = c(siteData$longitude[j], siteData$latitude[j]))
-  }
+library(hypervolume)
+# Determine suitability (i.e., sample size) for hypervolume analysis
+determineSuitability <- function(x){
+  # Determine suitability for hypervolume analysis
+  suitable <- ifelse(sum(x$rarefiedReadAbund > 0) >= 5, "yes", "no")
+  return(data.frame(suitable))
 }
-rownames(geogDist) <- siteData$site.id
-colnames(geogDist) <- siteData$site.id
 
-## CALCULATE BETA DIVERSITY BETWEEN SITES
-# Try this out with one site first
-testData <- arfSpeciesIDdata[[1]]
+OTU_df_suit <- ddply(.data = OTU_df3, .fun = determineSuitability, .variables = .(site,OTU_ID))
+OTU_df_suit2 <- merge(OTU_df3, OTU_df_suit, by = c("site", "OTU_ID"))
 
-testData_PA <- ifelse(testData > 0, 1, 0)
-testData_beta <- beta.pair(testData_PA)
-testData_betadist <- testData_beta$beta.sor
+# Exclude all unsuitable taxa
+test <- subset(OTU_df_suit2, OTU_ID == "OTU100", site = "Laupahoehoe")
 
-## MANTEL TESTS
-climDist <- matchDist(testData_betadist, climDist)
-geogDist <- matchDist(testData_betadist, geogDist)
+target.col <- c("rf_ann", "t_ann")
+hypervolume_gaussian(data = test[target.col], weight = test$rarefiedReadAbund)
 
-climDist_steinbeck <- as.matrix(climDist)[steinbeck_siteIDs, steinbeck_siteIDs]
-climDist_steinbeck_vector <- as.vector(as.dist(climDist_steinbeck))
-geogDist_steinbeck <- as.matrix(geogDist)[steinbeck_siteIDs, steinbeck_siteIDs]
-geogDist_steinbeck_vector <- as.vector(as.dist(geogDist_steinbeck))
+OTU_hypervols <- dlply(.data = subset(OTU_df_suit2, suitable == "yes"),
+                       .variables = .(site, OTU_ID),
+                       .fun = function(x){ list(hypervol = 
+                                                  hypervolume_gaussian( x[c("rf_ann", "t_ann")],
+                                                                 weight = x$rarefiedReadAbund),
+                                                site = x$site,
+                                                OTU_ID = x$OTU_ID,
+                                                Order = x$V4) } )
 
-climDist_laup <- as.matrix(climDist)[laupahoehoe_siteIDs, laupahoehoe_siteIDs]
-climDist_laup_vector <- as.vector(as.dist(climDist_laup))
-geogDist_laup <- as.matrix(climDist)[laupahoehoe_siteIDs, laupahoehoe_siteIDs]
-geogDist_laup_vector <- as.vector(as.dist(geogDist_laup))
+plot(OTU_hypervols[[3]])
 
-betaDist_steinbeck <- as.matrix(testData_betadist)[steinbeck_siteIDs, steinbeck_siteIDs]
-betaDist_steinbeck_vector <- as.vector(as.dist(betaDist_steinbeck))
-betaDist_laup <- as.matrix(testData_betadist)[laupahoehoe_siteIDs, laupahoehoe_siteIDs]
-betaDist_laup_vector <- as.vector(as.dist(betaDist_laup))
 
-plot(betaDist_steinbeck_vector ~ climDist_steinbeck_vector)
-plot(betaDist_steinbeck_vector ~ geogDist_steinbeck_vector)
+hypervolume_gaussian(data = OTU_df3[target.col], weight )
 
-mantel(geogDist_steinbeck, betaDist_steinbeck)
-mantel(geogDist_laup, betaDist_laup)
 
-mantel(climDist_steinbeck, betaDist_steinbeck)
-mantel(climDist_laup, betaDist_laup)
-
-# Scaled to unit variance
-geogDist_steinbeck_scaled <- geogDist_steinbeck_vector / sd(geogDist_steinbeck_vector)
-climDist_steinbeck_scaled <- climDist_steinbeck_vector / sd(climDist_steinbeck_vector)
-
-mod1 <- lm(betaDist_steinbeck_vector ~ geogDist_steinbeck_scaled + climDist_steinbeck_scaled)
-summary(mod1)
-# maybe geographic distance may not be the best; since all the climatic variation is collinear with distance (that's why it's an elevational transect!) What you would need is randomized sites that have varying geographic distance and climatic variation.
-
-## SPECIES ABUNDANCE WITH CLIMATE
-testData_melt <- melt(testData, value.name = "nReads", varnames = c("Site_ID", "Species_ID"))
-testData_melt <- merge(testData_melt, siteData[c("site.id", "site.1", "PC1", "PC2")], by.x = "Site_ID", by.y= "site.id")
-
-cleanData <- function(x, nSites){
-  # Keep only species that are found in more than equal the specified number of sites
-  if(sum(x$nReads > 0) >= nSites){
-    return(x)
+# Calculate haplotype diversity per site
+calcHaplotypeDiv <- function(df){
+  # Calculate haplotype diversity for each site
+  #df <- subset(combined_rarefied[[1]], Site_ID == 530 & Species_ID == "Species1")
+  #df<- subset(megaData2, Species_ID == "Species100" & Site_ID == "541")
+  temp <- subset(df, rarefiedReadAbund > 0)
+  nHaplotype <- length(unique(temp$zOTU_ID))
+  if(nHaplotype == 0 | nHaplotype == 1){
+    haplotypeDiversity <- 0
   } else {
-    return(NULL)
+    readCount <- tapply(temp$rarefiedReadAbund, INDEX = temp$zOTU_ID, FUN = sum)
+    propAbund <- readCount / sum(readCount)
+    haplotypeDiversity <- (nHaplotype / (nHaplotype-1))* (1 - sum(propAbund^2))  
   }
+  data.frame(haplotypeDiversity, nHaplotype)
 }
 
-table(siteData$site.1) # 25 laupahoehoe sites; 39 steinbeck
-rtest <- ddply(.data = subset(testData_melt, site.1 == "Laupahoehoe"),
-               .fun = cleanData,
-               .variables = .(Species_ID),
-               nSites = 16)
+haplotDivBySiteByOTU <- ddply(.data = subset(combData_clean, (!zOTU_ID %in% toExclude$zOTU_ID)), .var = .(OTU_ID, Site_ID), .fun = calcHaplotypeDiv, .progress = "text")
 
-speciesAbundancePlot <- ggplot(data = rtest) +
-  geom_point(aes(y = log10(nReads+1), x = PC1, color = Species_ID)) +
-  geom_smooth(aes(y = log10(nReads+1), x = PC1, color = Species_ID), se = FALSE) +
-  facet_wrap(~Species_ID) +
-  theme(legend.position = "none")
+saveRDS(haplotDivBySiteByOTU, file.path(data.dir, "haplotDivBySiteByOTU.rds"))
 
-ggsave(speciesAbundancePlot,
-       filename = file.path(fig.dir, "speciesAbundancePlot_laupahoehoe.pdf"),
-       height = 10, width = 10)
+ReadAbundanceBySiteByOTU <- ddply(.data = subset(combData_clean, (!zOTU_ID %in% toExclude$zOTU_ID)), .var = .(OTU_ID, Site_ID), .fun = summarize, siteReadAbundance = sum(rarefiedReadAbund), .progress = "text")
 
-rtest2 <- ddply(.data = subset(testData_melt, site.1 == "Stainback"),
-               .fun = cleanData,
-               .variables = .(Species_ID),
-               nSites = 24)
+saveRDS(ReadAbundanceBySiteByOTU, file.path(data.dir, "ReadAbundanceBySiteByOTU.rds"))
 
-speciesAbundancePlot_steinbeck <- ggplot(data = rtest2) +
-  geom_point(aes(y = log10(nReads+1), x = PC1, color = Species_ID)) +
-  geom_smooth(aes(y = log10(nReads+1), x = PC1, color = Species_ID), se = FALSE) +
-  facet_wrap(~Species_ID) +
-  theme(legend.position = "none")
+## PRELIMINARY PLOTS
+ReadAbundanceBySiteByOTU_Final <- merge(ReadAbundanceBySiteByOTU, taxonData, by = "OTU_ID")
 
-ggsave(speciesAbundancePlot_steinbeck,
-       filename = file.path(fig.dir, "speciesAbundancePlot_steinbeck.pdf"),
-       height = 10, width = 10)
+temp <- tapply(ReadAbundanceBySiteByOTU_Final$siteReadAbundance, ReadAbundanceBySiteByOTU_Final$OTU_ID, FUN = max)
+temp2 <- data.frame("OTU_ID" = names(temp), "maxAbund" = as.vector(temp))
+ReadAbundanceBySiteByOTU_Final2 <- merge(ReadAbundanceBySiteByOTU_Final, temp2, by = "OTU_ID")
+
+z <- merge(ReadAbundanceBySiteByOTU_Final2, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
+z$relAbund <- z$siteReadAbundance/ z$maxAbund
+z2 <- ggplot(aes(x = elevation, y = relAbund), data = subset(z, maxAbund > 1000)) + geom_point() + facet_wrap(vars(OTU_ID,site)) + geom_smooth(method = "loess")
+ggsave("~/Desktop/readAbundElev.pdf", z2, width = 20, height = 20)
 
 
-## Mantel tests;
-# * climate distance vs. turnover
-# * geographic distance vs. turnover
 
-# Import fasta (still need genetic distance from henrik)
-# Plot abundance against PC1, PC2 (for groups that are found in more than 5 sites, in each transect)
-# Plot abundance against PC1, PC2 for groups that are found in both sites, highlight by site
-# Find the mean? Niche distance? Schoener's D
-# Fit a truncated normal distribution? 
+z3 <- merge(haplotDivBySiteByOTU, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
+z4 <- subset(z3, nHaplotype > 0)
+z4 <- merge(z4, taxonData)
+#z5 <- ddply(.data = z4, .variables = .(Site_ID), summarize, meanHaplo = mean(haplotypeDiversity))
+#z6 <- merge(z4, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
 
-# Remove collembolla
-# 
+ggplot(aes(y = haplotypeDiversity, x = elevation, color = OTU_ID), data = z4) + facet_wrap(~site) + theme(legend.position = "none") + geom_smooth(method="glm", se = FALSE, alpha =0.5)
+library(lme4)
+mod <- glmer(haplotypeDiversity ~ elevation + (1|OTU_ID) + (elevation|OTU_ID), data = z4, family = "binomial")
+summary(mod)
+library(ggplot2)
 
-# Calculate genetic distance
-library(ape)
-otuFasta <- read.dna(file.path(data.dir, "ARFMCOAll_Species_ZOTU_OTUID042018.fasta"), format = "fasta")
-test <- rownames(otuFasta)
-test <- gsub(pattern = "_size_.*", replacement = "", test)
-temp <- str_split_fixed(test, pattern = "_", n = 6)
+install.packages("mcmcglmm")
 
-taxoRef <- as.data.frame(temp)
+library(nimble)
+haploCode <- nimbleCode({
+  for(i in 1:OTU_ID){
+    
+  }
+})
+table(subset(z4, site == "Laupahoehoe")$OTU_ID)
 
-collapseOtuRefs <- function(x){
-  #x = subset(taxoRef, V1 == "Species1008")
-  Order <- names(which.max(table(x$V4)))
-  Family <- names(which.max(table(x$V5)))
-  Genus <- names(which.max(table(x$V6)))
-  data.frame(Order, Family, Genus)
-}
-
-taxoRefSpecies <- ddply(.fun = collapseOtuRefs, .variables = .(V1), .data = taxoRef)
-taxoRefZOTUs <- ddply(.fun = collapseOtuRefs, .variables = .(V2), .data = taxoRef)
-taxoRefOTUs <- ddply(.fun = collapseOtuRefs, .variables = .(V3), .data = taxoRef)
-
-write.csv(taxoRefSpecies, file = file.path(data.dir, "taxoRefSpecies.csv"))
-write.csv(taxoRefZOTUs, file = file.path(data.dir, "taxoRefZOTUs.csv"))
-write.csv(taxoRefOTUs, file = file.path(data.dir, "taxoRefOTUs.csv"))
-
-## CALCULATE GENETIC DISTANCE BETWEEN OTUS ================
-
-geneticDist <- dist.dna(otuFasta, model = "K80", as.matrix = TRUE) # Genetic distances based on kimura 2-rate parameter
-geneticDist_df <- melt(geneticDist)
-
-geneticDist_df$Species1 <- str_split_fixed(geneticDist_df$Var1, n = 5, pattern = "_")[,1]
-geneticDist_df$Species2 <- str_split_fixed(geneticDist_df$Var2, n = 5, pattern = "_")[,1]
-
-geneticDist_df$ZOTU1 <- str_split_fixed(geneticDist_df$Var1, n = 5, pattern = "_")[,2]
-geneticDist_df$ZOTU2 <- str_split_fixed(geneticDist_df$Var2, n = 5, pattern = "_")[,2]
-
-geneticDist_df$OTU1 <- str_split_fixed(geneticDist_df$Var1, n = 5, pattern = "_")[,3]
-geneticDist_df$OTU2 <- str_split_fixed(geneticDist_df$Var2, n = 5, pattern = "_")[,3]
-
-
-geneticDist_species <- ddply(.data = geneticDist_df, .var = .(Species1, Species2), .fun = function(x){ geneticDist <- mean(x$value); data.frame(geneticDist) }, .progress = "text")
-geneticDist_ZOTU <- ddply(.data = geneticDist_df, .var = .(ZOTU1, ZOTU2), .fun = function(x){ geneticDist <- mean(x$value); data.frame(geneticDist) }, .progress = "text")
-geneticDist_OTU <- ddply(.data = geneticDist_df, .var = .(OTU1, OTU2), .fun = function(x){ geneticDist <- mean(x$value); data.frame(geneticDist) }, .progress = "text")
-
-saveRDS(geneticDist_species, file.path(data.dir, "geneticDist_species.rds"))
-saveRDS(geneticDist_ZOTU, file.path(data.dir, "geneticDist_ZOTU.rds"))
-saveRDS(geneticDist_OTU, file.path(data.dir, "geneticDist_OTU.rds"))
-
-length(unique(geneticDist_df$Species1))
-length(unique(geneticDist_df$ZOTU1))
-length(unique(geneticDist_df$OTU1))
-
-geneticDist_OTU <- readRDS(file.path(data.dir, "geneticDist_OTU.rds"))
-geneticDist_species <- readRDS(file.path(data.dir, "geneticDist_species.rds"))
-geneticDist_ZOTU <- readRDS(file.path(data.dir, "geneticDist_ZOTU.rds"))
-
-geneticDist_OTU_mat <- acast(geneticDist_OTU, OTU1 ~ OTU2, value.var = "geneticDist")
-geneticDist_species_mat <- acast(geneticDist_species, Species1 ~ Species2, value.var = "geneticDist")
-geneticDist_ZOTU_mat <- acast(geneticDist_ZOTU, ZOTU1 ~ ZOTU2, value.var = "geneticDist")
-
-saveRDS(geneticDist_species_mat, file.path(data.dir, "geneticDist_species_mat.rds"))
-saveRDS(geneticDist_OTU_mat, file.path(data.dir, "geneticDist_OTU_mat.rds"))
-saveRDS(geneticDist_ZOTU_mat, file.path(data.dir, "geneticDist_ZOTU_mat.rds"))
-
-## CALCULATE PAIRWISE SITE GENETIC DIVERSITY ================
-library(picante)
-
-geneticDist_ZOTU_mat <- readRDS(file.path(data.dir, "geneticDist_ZOTU_mat.rds"))
-arfZOTU_geneticDist_laup <- comdist(comm = arfZOTU_laup, dis = geneticDist_ZOTU_mat, abundance.weighted = FALSE)
-arfZOTU_geneticDist_stein <- comdist(comm = arfZOTU_stein, dis = geneticDist_ZOTU_mat, abundance.weighted = FALSE)
-
-saveRDS(arfZOTU_geneticDist_laup, file.path(data.dir, "arfZOTU_geneticDist_laup.rds"))
-saveRDS(arfZOTU_geneticDist_stein, file.path(data.dir, "arfZOTU_geneticDist_stein.rds"))
-
-geneticDist_OTU_mat <- readRDS(file.path(data.dir, "geneticDist_OTU_mat.rds"))
-arfOTU_geneticDist_laup <- comdist(comm = arfOTU_laup, dis = geneticDist_OTU_mat, abundance.weighted = FALSE)
-arfOTU_geneticDist_stein <- comdist(comm = arfOTU_stein, dis = geneticDist_OTU_mat, abundance.weighted = FALSE)
-
-saveRDS(arfOTU_geneticDist_laup, file.path(data.dir, "arfOTU_geneticDist_laup.rds"))
-saveRDS(arfOTU_geneticDist_stein, file.path(data.dir, "arfOTU_geneticDist_stein.rds"))
-
-# Subset data for testing
-write.csv(arfZOTUIDdata[[1]], file.path(data.dir, "arf_ZOTU_subset.csv"))
-write.csv(arfOTUIDdata[[1]], file.path(data.dir, "arf_OTU_subset.csv"))
-
-arfZOTU_laup <- arfZOTUIDdata[[1]][rownames(arfZOTUIDdata[[1]]) %in% laupahoehoe_siteIDs,]
-arfZOTU_stein <- arfZOTUIDdata[[1]][rownames(arfZOTUIDdata[[1]]) %in% steinbeck_siteIDs,]
-
-arfOTU_laup <- arfOTUIDdata[[1]][rownames(arfOTUIDdata[[1]]) %in% laupahoehoe_siteIDs,]
-arfOTU_stein <- arfOTUIDdata[[1]][rownames(arfOTUIDdata[[1]]) %in% steinbeck_siteIDs,]
-
-saveRDS(arfZOTU_laup, file.path(data.dir, "arfZOTU_laup.rds"))
-saveRDS(arfZOTU_stein, file.path(data.dir, "arfZOTU_stein.rds"))
-
-saveRDS(arfOTU_laup, file.path(data.dir, "arfOTU_laup.rds"))
-saveRDS(arfOTU_stein, file.path(data.dir, "arfOTU_stein.rds"))
+subset(z4, site == "Laupahoehoe" & OTU_ID == "OTU90")
+# There are 25 laupahoehoe and 39 Stainback sites
