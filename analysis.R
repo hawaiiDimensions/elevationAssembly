@@ -13,6 +13,7 @@ main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/"
 analysis.dir <- file.path(main.dir, "elevationAssemblyHawaii")
 data.dir <- file.path(main.dir, "data")
 fig.dir <- file.path(analysis.dir, "figures")
+res.dir <- file.path(analysis.dir, "results")
 source(file.path(analysis.dir, "metabarcodingTools.R"))
 
 # Import site data
@@ -43,7 +44,6 @@ OTU_df3 <- merge(x = OTU_df2, y = siteData[c("site.id", "rf_ann", "t_ann", "site
 library(hypervolume)
 # Determine suitability (i.e., sample size) for hypervolume analysis
 determineSuitability <- function(x){
-  # Determine suitability for hypervolume analysis
   suitable <- ifelse(sum(x$rarefiedReadAbund > 0) >= 5, "yes", "no")
   return(data.frame(suitable))
 }
@@ -52,24 +52,32 @@ OTU_df_suit <- ddply(.data = OTU_df3, .fun = determineSuitability, .variables = 
 OTU_df_suit2 <- merge(OTU_df3, OTU_df_suit, by = c("site", "OTU_ID"))
 
 # Exclude all unsuitable taxa
-test <- subset(OTU_df_suit2, OTU_ID == "OTU100", site = "Laupahoehoe")
-
 target.col <- c("rf_ann", "t_ann")
 hypervolume_gaussian(data = test[target.col], weight = test$rarefiedReadAbund)
 
-OTU_hypervols <- dlply(.data = subset(OTU_df_suit2, suitable == "yes"),
+OTU_hypervols <- dlply(.data = subset(OTU_df_suit2, suitable == "yes" & rarefiedReadAbund > 0 ),
                        .variables = .(site, OTU_ID),
                        .fun = function(x){ list(hypervol = 
                                                   hypervolume_gaussian( x[c("rf_ann", "t_ann")],
                                                                  weight = x$rarefiedReadAbund),
-                                                site = x$site,
-                                                OTU_ID = x$OTU_ID,
-                                                Order = x$V4) } )
+                                                site = x$site[1],
+                                                OTU_ID = x$OTU_ID[1],
+                                                Order = x$V4[1]) } )
+saveRDS(OTU_hypervols, file.path(res.dir, "OTU_hypervol.rds"))
 
-plot(OTU_hypervols[[3]])
+library(plyr)
+OTU_hypervol_df <- ldply(.data = OTU_hypervols, .fun = function(x){data.frame( hypervol = x$hypervol@Volume, site = x$site, OTU_ID = x$OTU_ID, Order = x$Order) } )
+
+ggplot(data = OTU_hypervol_df) + geom_boxplot(aes(y = hypervol, x = site, fill = Order))
 
 
-hypervolume_gaussian(data = OTU_df3[target.col], weight )
+# The weights do not deal with zero weights as expected...
+test <- data.frame(y = rnorm(100, 0, 1), x = rnorm(100,0,1))
+plot(y~ x, data = test)
+x <- hypervolume_gaussian(data = test, weight = rep(1,100))
+plot(x)
+y <- hypervolume_gaussian(data = rbind(test, c(500, 500)), weight = c(rep(1,100), 0) )
+
 
 
 # Calculate haplotype diversity per site
@@ -96,6 +104,8 @@ saveRDS(haplotDivBySiteByOTU, file.path(data.dir, "haplotDivBySiteByOTU.rds"))
 ReadAbundanceBySiteByOTU <- ddply(.data = subset(combData_clean, (!zOTU_ID %in% toExclude$zOTU_ID)), .var = .(OTU_ID, Site_ID), .fun = summarize, siteReadAbundance = sum(rarefiedReadAbund), .progress = "text")
 
 saveRDS(ReadAbundanceBySiteByOTU, file.path(data.dir, "ReadAbundanceBySiteByOTU.rds"))
+
+
 
 ## PRELIMINARY PLOTS
 ReadAbundanceBySiteByOTU_Final <- merge(ReadAbundanceBySiteByOTU, taxonData, by = "OTU_ID")
