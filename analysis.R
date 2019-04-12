@@ -41,9 +41,7 @@ OTU_df2 <- merge(x = OTU_df, y = taxonData[c("OTU_ID", "V4")], by = "OTU_ID", al
 OTU_df2 <- OTU_df2[!duplicated(OTU_df2),]
 OTU_df3 <- merge(x = OTU_df2, y = siteData[c("site.id", "rf_ann", "t_ann", "site")], by = "site.id")
 
-## Calculate hypervolumes ==== 
-library(hypervolume)
-# Determine suitability (i.e., sample size) for hypervolume analysis
+# Only include species that occur in more than 5 sites.
 determineSuitability <- function(x){
   suitable <- ifelse(sum(x$rarefiedReadAbund > 0) >= 5, "yes", "no")
   return(data.frame(suitable))
@@ -52,35 +50,7 @@ determineSuitability <- function(x){
 OTU_df_suit <- ddply(.data = OTU_df3, .fun = determineSuitability, .variables = .(site,OTU_ID))
 OTU_df_suit2 <- merge(OTU_df3, OTU_df_suit, by = c("site", "OTU_ID"))
 
-# Exclude all unsuitable taxa
-target.col <- c("rf_ann", "t_ann")
-hypervolume_gaussian(data = test[target.col], weight = test$rarefiedReadAbund)
-
-OTU_hypervols <- dlply(.data = subset(OTU_df_suit2, suitable == "yes" & rarefiedReadAbund > 0 ),
-                       .variables = .(site, OTU_ID),
-                       .fun = function(x){ list(hypervol = 
-                                                  hypervolume_gaussian( x[c("rf_ann", "t_ann")],
-                                                                 weight = x$rarefiedReadAbund),
-                                                site = x$site[1],
-                                                OTU_ID = x$OTU_ID[1],
-                                                Order = x$V4[1]) } )
-saveRDS(OTU_hypervols, file.path(res.dir, "OTU_hypervol.rds"))
-
-library(plyr)
-OTU_hypervols <- readRDS(file.path(res.dir, "OTU_hypervol.rds"))
-OTU_hypervol_df <- ldply(.data = OTU_hypervols, .fun = function(x){data.frame( hypervol = x$hypervol@Volume, site = x$site, OTU_ID = x$OTU_ID, Order = x$Order) } )
-
-OTU_hypervol_df2 <- dcast(OTU_hypervol_df, formula = OTU_ID ~ site, value.var = "hypervol")
-ggplot(OTU_hypervol_df2) + geom_point(aes(y = Laupahoehoe, x = Stainback)) + geom_abline(slope = 1, intercept = 0)
-
-
-ggplot(data = OTU_hypervol_df) + geom_boxplot(aes(y = hypervol, x = site, fill = Order))
-ggplot(data = OTU_hypervol_df) + geom_boxplot(aes(y = hypervol, x = site, fill = Order))
-
 # Calculate quantiles ======
-with(OTU_df3, tapply(rf_ann, INDEX = site, FUN = range))
-with(OTU_df3, tapply(t_ann, INDEX = site, FUN = range))
-
 findLimits <- function(x){
   rf_v <- rep(x$rf_ann, x$rarefiedReadAbund)
   temp_v <- rep(x$t_ann, x$rarefiedReadAbund)
@@ -124,77 +94,7 @@ y2 <- merge(x = y, y = taxonDataOTU, by = "OTU_ID", all = FALSE)
 ggplot(aes(y = Laupahoehoe, x = Stainback),data = y2) + geom_point(aes(color = V4)) + geom_abline(slope = 1, intercept = 0) + geom_smooth(method = "lm")
 
 
-# The weights do not deal with zero weights as expected...
-test <- data.frame(y = rnorm(100, 0, 1), x = rnorm(100,0,1))
-plot(y~ x, data = test)
-x <- hypervolume_gaussian(data = test, weight = rep(1,100))
-plot(x)
-y <- hypervolume_gaussian(data = rbind(test, c(500, 500)), weight = c(rep(1,100), 0) )
+with(OTU_df3, tapply(rf_ann, INDEX = site, FUN = range))
+with(OTU_df3, tapply(t_ann, INDEX = site, FUN = range))
 
-
-
-# Calculate haplotype diversity per site
-calcHaplotypeDiv <- function(df){
-  # Calculate haplotype diversity for each site
-  #df <- subset(combined_rarefied[[1]], Site_ID == 530 & Species_ID == "Species1")
-  #df<- subset(megaData2, Species_ID == "Species100" & Site_ID == "541")
-  temp <- subset(df, rarefiedReadAbund > 0)
-  nHaplotype <- length(unique(temp$zOTU_ID))
-  if(nHaplotype == 0 | nHaplotype == 1){
-    haplotypeDiversity <- 0
-  } else {
-    readCount <- tapply(temp$rarefiedReadAbund, INDEX = temp$zOTU_ID, FUN = sum)
-    propAbund <- readCount / sum(readCount)
-    haplotypeDiversity <- (nHaplotype / (nHaplotype-1))* (1 - sum(propAbund^2))  
-  }
-  data.frame(haplotypeDiversity, nHaplotype)
-}
-
-haplotDivBySiteByOTU <- ddply(.data = subset(combData_clean, (!zOTU_ID %in% toExclude$zOTU_ID)), .var = .(OTU_ID, Site_ID), .fun = calcHaplotypeDiv, .progress = "text")
-
-saveRDS(haplotDivBySiteByOTU, file.path(data.dir, "haplotDivBySiteByOTU.rds"))
-
-ReadAbundanceBySiteByOTU <- ddply(.data = subset(combData_clean, (!zOTU_ID %in% toExclude$zOTU_ID)), .var = .(OTU_ID, Site_ID), .fun = summarize, siteReadAbundance = sum(rarefiedReadAbund), .progress = "text")
-
-saveRDS(ReadAbundanceBySiteByOTU, file.path(data.dir, "ReadAbundanceBySiteByOTU.rds"))
-
-
-
-## PRELIMINARY PLOTS
-ReadAbundanceBySiteByOTU_Final <- merge(ReadAbundanceBySiteByOTU, taxonData, by = "OTU_ID")
-
-temp <- tapply(ReadAbundanceBySiteByOTU_Final$siteReadAbundance, ReadAbundanceBySiteByOTU_Final$OTU_ID, FUN = max)
-temp2 <- data.frame("OTU_ID" = names(temp), "maxAbund" = as.vector(temp))
-ReadAbundanceBySiteByOTU_Final2 <- merge(ReadAbundanceBySiteByOTU_Final, temp2, by = "OTU_ID")
-
-z <- merge(ReadAbundanceBySiteByOTU_Final2, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
-z$relAbund <- z$siteReadAbundance/ z$maxAbund
-z2 <- ggplot(aes(x = elevation, y = relAbund), data = subset(z, maxAbund > 1000)) + geom_point() + facet_wrap(vars(OTU_ID,site)) + geom_smooth(method = "loess")
-ggsave("~/Desktop/readAbundElev.pdf", z2, width = 20, height = 20)
-
-
-
-z3 <- merge(haplotDivBySiteByOTU, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
-z4 <- subset(z3, nHaplotype > 0)
-z4 <- merge(z4, taxonData)
-#z5 <- ddply(.data = z4, .variables = .(Site_ID), summarize, meanHaplo = mean(haplotypeDiversity))
-#z6 <- merge(z4, siteData[c("elevation", "site", "rf_ann", "t_ann", "site.id")], by.x = "Site_ID", by.y = "site.id")
-
-ggplot(aes(y = haplotypeDiversity, x = elevation, color = OTU_ID), data = z4) + facet_wrap(~site) + theme(legend.position = "none") + geom_smooth(method="glm", se = FALSE, alpha =0.5)
-library(lme4)
-mod <- glmer(haplotypeDiversity ~ elevation + (1|OTU_ID) + (elevation|OTU_ID), data = z4, family = "binomial")
-summary(mod)
-library(ggplot2)
-
-install.packages("mcmcglmm")
-
-library(nimble)
-haploCode <- nimbleCode({
-  for(i in 1:OTU_ID){
-    
-  }
-})
-table(subset(z4, site == "Laupahoehoe")$OTU_ID)
-
-subset(z4, site == "Laupahoehoe" & OTU_ID == "OTU90")
-# There are 25 laupahoehoe and 39 Stainback sites
+## NOTES:
