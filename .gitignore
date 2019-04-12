@@ -34,3 +34,6 @@ vignettes/*.pdf
 
 # OS files
 .DS_Store
+
+# Results folder
+results/*
