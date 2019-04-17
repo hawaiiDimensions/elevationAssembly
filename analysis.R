@@ -2,13 +2,13 @@
 # Author: Jun Ying Lim
 # Rarefies OTU tables for analysis
 
-## PACKAGES ============
+## Packages ============
 library(stringr); library(plyr); library(reshape2) # data manipulation tools
 library(vegan) # calculating beta diversity
 library(geosphere) # calculating geographic distances
 library(ggplot2); library(ggrepel)
 
-## IMPORT DATA ============
+## Import data ============
 main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/"
 analysis.dir <- file.path(main.dir, "elevationAssemblyHawaii")
 data.dir <- file.path(main.dir, "data")
@@ -30,10 +30,10 @@ SPP_mat <- readRDS(file.path(data.dir, "SPP_native.rds"))
 
 # Import taxonmic reference
 taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
+OTUtaxonData <- taxonData[c("OTU_ID", "V4")]
+OTUtaxonData <- OTUtaxonData[!duplicated(OTUtaxonData),]
 
-## ABUNDANCE PATTERNS =========
-aranaeae_ZOTU <- subset(taxonData, V4 == "Araneae")$zOTU_ID
-
+## Abundance patterns =========
 OTU_df <- melt(OTU_mat, value.name = "rarefiedReadAbund", varnames = c("OTU_ID", "site.id"))
 OTU_df2 <- merge(x = OTU_df, y = taxonData[c("OTU_ID", "V4")], by = "OTU_ID", all.x = TRUE)
 
@@ -50,7 +50,7 @@ determineSuitability <- function(x){
 OTU_df_suit <- ddply(.data = OTU_df3, .fun = determineSuitability, .variables = .(site,OTU_ID))
 OTU_df_suit2 <- merge(OTU_df3, OTU_df_suit, by = c("site", "OTU_ID"))
 
-# Calculate quantiles ======
+# Calculate OTU climatic ranges and optima by site ======
 findLimits <- function(x){
   rf_v <- rep(x$rf_ann, x$rarefiedReadAbund)
   temp_v <- rep(x$t_ann, x$rarefiedReadAbund)
@@ -64,37 +64,173 @@ findLimits <- function(x){
   rf_upper <- rf_q[3]
   data.frame(temp_lower, temp_upper, temp_median, rf_lower, rf_upper, rf_median, order = x$V4[1])
 }
-test <- ddply(.data = subset(OTU_df_suit2, suitable == "yes"), .variables = .(site, OTU_ID), .fun = findLimits)
 
+# Calculate the OTU climatic ranges and optima
+OTU_clim_site <- ddply(.data = subset(OTU_df_suit2, suitable == "yes"), .variables = .(site, OTU_ID), .fun = findLimits)
+OTU_clim_glob  <- ddply(.data = subset(OTU_df_suit2, suitable == "yes"), .variables = .(OTU_ID), .fun = findLimits)
 
-subset(OTU_df_suit2, site == "Laupahoehoe" & OTU_ID == "OTU300" & rarefiedReadAbund >0)
-subset(OTU_df_suit2, site == "Laupahoehoe" & OTU_ID == "OTU74" & rarefiedReadAbund >0)
-
-test$rf_range <- test$rf_upper - test$rf_lower
-test$rf_site_upperlimit <- ifelse(test$site == "Laupahoehoe", ifelse(test$rf_upper == 4402.763, 1, 0), ifelse(test$rf_upper == 6388.352, 1, 0))
-test$rf_site_lowerlimit <- ifelse(test$site == "Laupahoehoe", ifelse(test$rf_lower == 2840.776, 1, 0), ifelse(test$rf_lower == 2480.524, 1, 0))
-
-test$temp_range <- test$temp_upper - test$temp_lower
-test$temp_site_upperlimit <- ifelse(test$site == "Laupahoehoe", ifelse(test$temp_upper == 17.89003, 1, 0), ifelse(test$temp_upper == 18.16707, 1, 0))
-test$temp_site_lowerlimit <- ifelse(test$site == "Laupahoehoe", ifelse(test$temp_lower == 13.54576, 1, 0), ifelse(test$temp_lower == 12.28192, 1, 0))
-
-ggplot(data = subset(test, !(temp_site_lowerlimit==1 | temp_site_upperlimit == 1))) + 
-  geom_boxplot(aes(y = temp_range, x = site, fill = order))
-library(lmerTest)
-mod <- lmer(temp_range ~ site + (1|order), 
-     data = subset(test, !(temp_site_lowerlimit==1 | temp_site_upperlimit == 1)))
-MuMIn::r.squaredGLMM(mod)
-
-summary(lm(temp_range ~ site, 
-   data = subset(test, !(temp_site_lowerlimit==1 | temp_site_upperlimit == 1))))
-
-y <- dcast( subset(test, !(temp_site_lowerlimit==1 | temp_site_upperlimit == 1)), formula = OTU_ID ~ site, value.var = "temp_median")
-taxonDataOTU <- taxonData[c("OTU_ID", "V4")][!duplicated(taxonData[c("OTU_ID", "V4")]),]
-y2 <- merge(x = y, y = taxonDataOTU, by = "OTU_ID", all = FALSE)
-ggplot(aes(y = Laupahoehoe, x = Stainback),data = y2) + geom_point(aes(color = V4)) + geom_abline(slope = 1, intercept = 0) + geom_smooth(method = "lm")
-
-
+# Flag species that are most abundant at the sampling limits
 with(OTU_df3, tapply(rf_ann, INDEX = site, FUN = range))
 with(OTU_df3, tapply(t_ann, INDEX = site, FUN = range))
 
+OTU_clim_site$rf_range <- OTU_clim_site$rf_upper - OTU_clim_site$rf_lower
+OTU_clim_site$rf_site_upperlimit <- ifelse(OTU_clim_site$site == "Laupahoehoe",
+                                           ifelse(OTU_clim_site$rf_upper == 4402.763, 1, 0),
+                                           ifelse(OTU_clim_site$rf_upper == 6388.352, 1, 0))
+OTU_clim_site$rf_site_lowerlimit <- ifelse(OTU_clim_site$site == "Laupahoehoe",
+                                           ifelse(OTU_clim_site$rf_lower == 2840.776, 1, 0),
+                                           ifelse(OTU_clim_site$rf_lower == 2480.524, 1, 0))
+
+OTU_clim_site$temp_range <- OTU_clim_site$temp_upper - OTU_clim_site$temp_lower
+OTU_clim_site$temp_site_upperlimit <- ifelse(OTU_clim_site$site == "Laupahoehoe",
+                                             ifelse(OTU_clim_site$temp_upper == 17.89003, 1, 0),
+                                             ifelse(OTU_clim_site$temp_upper == 18.16707, 1, 0))
+OTU_clim_site$temp_site_lowerlimit <- ifelse(OTU_clim_site$site == "Laupahoehoe",
+                                             ifelse(OTU_clim_site$temp_lower == 13.54576, 1, 0),
+                                             ifelse(OTU_clim_site$temp_lower == 12.28192, 1, 0))
+
+OTU_clim_site_subset <- subset(OTU_clim_site, !order %in% c("Amphipoda", "Diptera", "Hymenoptera"))
+OTU_clim_site_subset$site <- OTU_clim_site_subset$site
+
+temp_r_site_plot <- ggplot(data = subset(OTU_clim_site_subset,!(temp_site_lowerlimit==1|temp_site_upperlimit == 1))) +
+  geom_boxplot(aes(y = temp_range, x = site, fill = order)) + 
+  scale_fill_brewer(palette = "Spectral") + 
+  guides(fill = guide_legend(title = "Order")) +
+  labs(y = "Mean annual temperature range", x = "Site")
+
+rf_r_site_plot <- ggplot(data = subset(OTU_clim_site_subset,!(rf_site_lowerlimit==1|rf_site_upperlimit == 1))) +
+  geom_boxplot(aes(y = rf_range, x = site, fill = order)) + 
+  scale_fill_brewer(palette = "Spectral") + 
+  guides(fill = guide_legend(title = "Order")) +
+  labs(y = "Mean annual rainfall range", x = "Site") +
+  theme(legend.position = "bottom",legend.justification="center")
+
+order_leg <- get_legend(rf_r_site_plot)
+
+# Plot climatic ranges for all OTUs by site and order
+library(cowplot)
+clim_plot_woleg <- plot_grid(temp_r_site_plot + theme(legend.position = "none"),
+                             rf_r_site_plot + theme(legend.position = "none"), labels = "AUTO")
+clim_plot_wleg <- plot_grid(clim_plot_woleg, order_leg, nrow = 2, rel_heights = c(4,1))
+ggsave(file.path(fig.dir, "climrange.pdf"), clim_plot_wleg, width = 8, height = 5)
+
+## Niche conservatism across sites
+OTU_tempMcons <- dcast( subset(OTU_clim_site_subset, !(temp_site_lowerlimit==1 | temp_site_upperlimit == 1)), formula = OTU_ID ~ site, value.var = "temp_median")
+OTU_tempMcons2 <- merge(OTU_tempMcons, OTUtaxonData)
+
+OTU_rfMcons <- dcast( subset(OTU_clim_site_subset, !(temp_site_lowerlimit==1 | temp_site_upperlimit == 1)), formula = OTU_ID ~ site, value.var = "rf_median")
+OTU_rfMcons2 <- merge(OTU_rfMcons, OTUtaxonData)
+
+tempMcons_plot <- ggplot(data = na.omit(OTU_tempMcons2)) + geom_point(aes(y = Laupahoehoe, x= Stainback, fill = V4), pch = 21, size = 2) + geom_smooth(aes(y = Laupahoehoe, x = Stainback), method = "lm", col = "grey70") + 
+  guides(fill = guide_legend(title = "Order", override.aes = list(size = 3))) + 
+  labs(y = "Median annual temperature\n(Laupahoehoe)", x = "Median annual temperature\n(Stainback)") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "bottom")
+
+rfMcons_plot <- ggplot(data = na.omit(OTU_rfMcons2)) + geom_point(aes(y = Laupahoehoe, x= Stainback, fill = V4), pch = 21, size = 2) + geom_smooth(aes(y = Laupahoehoe, x = Stainback), method = "lm", col = "grey70") + 
+  guides(fill = guide_legend(title = "Order", override.aes = list(size = 3))) + 
+  labs(y = "Median annual precipitation\n(Laupahoehoe)", x = "Median annual precipitation\n(Stainback)") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "bottom",
+        legend.justification = "center")
+
+mediancons_leg <- get_legend(rfMcons_plot)
+
+mediancons_comb <- plot_grid(plot_grid(tempMcons_plot + theme(legend.position = "none"),
+                                       rfMcons_plot + theme(legend.position= "none"), labels = "AUTO",
+                                       nrow = 1, rel_widths = c(1,1), align = "v"),
+                             mediancons_leg,
+                             nrow = 2, rel_heights = c(1, 0.1))
+ggsave(file.path(fig.dir, "medianconservatism.pdf"), mediancons_comb, width = 8, height = 5)
+
+## Range conservatism ===============
+OTU_tempRcons <- dcast( subset(OTU_clim_site_subset, !(temp_site_lowerlimit==1 | temp_site_upperlimit == 1)), formula = OTU_ID ~ site, value.var = "temp_range")
+OTU_tempRcons2 <- merge(OTU_tempRcons, OTUtaxonData)
+
+OTU_rfRcons <- dcast( subset(OTU_clim_site_subset, !(temp_site_lowerlimit==1 | temp_site_upperlimit == 1)), formula = OTU_ID ~ site, value.var = "rf_range")
+OTU_rfRcons2 <- merge(OTU_rfRcons, OTUtaxonData)
+
+tempRcons_plot <- ggplot(data = na.omit(OTU_tempRcons2)) + geom_point(aes(y = Laupahoehoe, x= Stainback, fill = V4), pch = 21, size = 2) + geom_smooth(aes(y = Laupahoehoe, x = Stainback), method = "lm", col = "grey70") + 
+  guides(fill = guide_legend(title = "Order", override.aes = list(size = 3))) + 
+  labs(y = "Range in median annual temperature\n(Laupahoehoe)",
+       x = "Range in median annual temperature\n(Stainback)") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "bottom")
+
+rfRcons_plot <- ggplot(data = na.omit(OTU_rfRcons2)) + geom_point(aes(y = Laupahoehoe, x= Stainback, fill = V4), pch = 21, size = 2) + geom_smooth(aes(y = Laupahoehoe, x = Stainback), method = "lm", col = "grey70") + 
+  guides(fill = guide_legend(title = "Order", override.aes = list(size = 3))) + 
+  labs(y = "Range in annual precipitation\n(Laupahoehoe)", x = "Range in annual precipitation\n(Stainback)") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "bottom",
+        legend.justification = "center")
+
+rangecons_leg <- get_legend(rfRcons_plot)
+
+rangecons_comb <- plot_grid(plot_grid(tempRcons_plot + theme(legend.position = "none"),
+                                       rfRcons_plot + theme(legend.position= "none"), labels = "AUTO",
+                                       nrow = 1, rel_widths = c(1,1), align = "v"),
+                             rangecons_leg,
+                             nrow = 2, rel_heights = c(1, 0.1))
+ggsave(file.path(fig.dir, "rangeconservatism.pdf"), rangecons_comb, width = 8, height = 5)
+
+## Calculate climatic optima across both sites ========
+
+#geneticDist <- read.csv(file.path(data.dir, "K2P_Distance_COI.csv"))
+geneticDistOTU <- readRDS(file.path(data.dir, "geneticDist_OTU_mat.rds"))
+taxonRefOTUs <- read.csv(file.path(data.dir, "taxoRefOTUs.csv"))
+
+OTU_genDist <- melt(as.matrix(geneticDistOTU), value.name = "genDist")
+
+rownames(OTU_clim_glob) <- OTU_clim_glob$OTU_ID
+
+rf_upperlim <- OTU_clim_glob$OTU_ID[OTU_clim_glob$rf_upper %in% c(4402.763,6388.352)]
+rf_lowerlim <- OTU_clim_glob$OTU_ID[OTU_clim_glob$rf_upper %in% c(2480.524,2840.776) ]
+temp_upperlim <- OTU_clim_glob$OTU_ID[OTU_clim_glob$rf_upper %in% c(18.16707, 17.89003)]
+temp_lowerlim <- OTU_clim_glob$OTU_ID[OTU_clim_glob$rf_upper %in% c(12.28192, 13.54576)]
+OTU_lim_list <- Reduce(list(rf_upperlim, rf_lowerlim, temp_upperlim, temp_lowerlim), f = union)
+
+
+
+OTU_temp_diff <- melt(as.matrix(dist(OTU_clim_glob["temp_median"])), value.name = "temp_median_diff")
+OTU_rf_diff <- melt(as.matrix(dist(OTU_clim_glob["rf_median"])), value.name = "rf_median_diff")
+(OTU_temp_diff)
+OTU_diff <- Reduce(list(OTU_genDist, OTU_temp_diff, OTU_rf_diff), f = merge)
+
+OTU_diff2 <- subset(OTU_diff, !Var1 == Var2)
+OTU_diff3 <- merge(y = taxonRefOTUs[c("V3", "Genus", "Order")], x = OTU_diff2, by.y = "V3", by.x = "Var1", suffixes = "Var1")
+OTU_diff4 <- merge(y = taxonRefOTUs[c("V3", "Genus", "Order")], x = OTU_diff3, by.y = "V3", by.x = "Var2", suffixes = "Var2")
+names(OTU_diff4)
+
+dim(OTU_diff2)
+dim(OTU_diff3)
+dim(OTU_diff4)
+names(OTU_diff4)
+nichecons <- ggplot(aes(x = genDist, y = temp_median_diff), data= subset(OTU_diff4, GenusNA == GenusVar2 & (!OrderVar2 %in% c("Amphipoda", "Diptera", "Hymenoptera")))) + geom_point(aes(fill = OrderVar2), pch = 21, size = 2) + facet_wrap(~OrderVar2, nrow = 2) + geom_smooth(colour = "black", method = "lm") +   scale_fill_brewer(palette = "Spectral")
+ggsave(file.path(fig.dir, "nicheevol_temp.pdf"), nichecons, width = 10, height = 5)
+
+
+nichecons2 <- ggplot(aes(x = genDist, y = rf_median_diff),
+                     data= subset(OTU_diff4,
+                                  GenusNA == GenusVar2 & 
+                                    (!GenusNA == "") &
+                                    (!OrderVar2 %in% c("Amphipoda", "Diptera", "Hymenoptera")) & 
+                                    (! Var1 %in% OTU_lim_list) & 
+                                    (! Var2 %in% OTU_lim_list))) + geom_point(aes(fill = OrderVar2), pch = 21, size = 2) + facet_wrap(~OrderVar2, nrow = 2) + geom_smooth(colour = "black", method = "lm") +   scale_fill_brewer(palette = "Spectral")
+ggsave(file.path(fig.dir, "nicheevol_rf.pdf"), nichecons2, width = 10, height = 5)
+
+
+dim(subset(OTU_diff4,
+           GenusNA == GenusVar2 & 
+             (!OrderVar2 %in% c("Amphipoda", "Diptera", "Hymenoptera")) & 
+             (! Var1 %in% OTU_lim_list) & 
+             (! Var2 %in% OTU_lim_list)))
+dim(OTU_diff4)
+dim(subset(OTU_diff4,
+           GenusNA == GenusVar2 & 
+             (!OrderVar2 %in% c("Amphipoda", "Diptera", "Hymenoptera"))))
+
 ## NOTES:
+# Fig 1: Shared OTUs, Range L vs Range S, a) Temp, b) Precipitation
+# Fig 2: All OTUs Box pt Range L vs Range S
+# Fig 3: Shared OTUs, Mean t vs Mean t , Mean rf vs Mean rf
+# Fig 4: Niche conservatism (using the global mean and )

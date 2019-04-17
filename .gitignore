@@ -37,3 +37,4 @@ vignettes/*.pdf
 
 # Results folder
 results/*
+figures/*
