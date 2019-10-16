@@ -255,3 +255,17 @@ calcNiche <- function(mat, site.data, env.vars, site.var){
     return(do.call("cbind",niche_para))
   })
 }
+
+findLimits <- function(x){
+  rf_v <- rep(x$rf_ann, x$nReads)
+  temp_v <- rep(x$t_ann, x$nReads)
+  rf_q <- quantile(rf_v, probs = c(0.25, 0.5, 0.75))
+  temp_q <- quantile(temp_v, probs = c(0.25, 0.5, 0.75))
+  temp_lower <- temp_q[1] 
+  temp_median <- temp_q[2]
+  temp_upper <- temp_q[3]
+  rf_lower <- rf_q[1]
+  rf_median <- rf_q[2]
+  rf_upper <- rf_q[3]
+  data.frame(temp_lower, temp_upper, temp_median, rf_lower, rf_upper, rf_median)
+}
