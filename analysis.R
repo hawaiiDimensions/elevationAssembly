@@ -25,120 +25,480 @@ laupahoehoe_siteIDs <- subset(siteData, site.1 == "Laupahoehoe")$site.id
 stainback_siteIDs <- subset(siteData, site.1 == "Stainback")$site.id
 
 # Import otu data
-zOTU_mat <- readRDS(file.path(data.dir, "zOTU_native.rds"))
-OTU_mat <- readRDS(file.path(data.dir, "OTU_native.rds"))
-SPP_mat <- readRDS(file.path(data.dir, "SPP_native.rds"))
+otu_native_files <- list.files(file.path(data.dir, "OTU_native"))
+
+OTU_mat_list <- lapply(otu_native_files, FUN = function(x){readRDS(file.path(data.dir, "OTU_native", x))})
+#OTU_mat <- readRDS(file.path(data.dir, "OTU_native.rds"))
+#OTU_mat <- OTU_mat_list[[1]]
 
 # Import taxonmic reference
 taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
 OTUtaxonData <- taxonData[c("OTU_ID", "V4")]
 OTUtaxonData <- OTUtaxonData[!duplicated(OTUtaxonData),]
 
-## Abundance patterns =========
-# Only analyze OTUs that have been matched to certain orders
-targetOrders <- c("Acari", "Araneae", "Coleoptera", "Lepidoptera", "Orthoptera", "Neuroptera", "Psocoptera", "Hemiptera")
-otu_target <- which(taxonData$V4[match(rownames(OTU_mat), taxonData$OTU_ID)] %in% targetOrders)
-OTU_df <- melt(data = OTU_mat[otu_target,], value.name = "nReads", varnames = c("OTU_ID", "site.id"))
-OTU_clim_df <- merge(x = OTU_df, y = siteData[c("site","site.id", "rf_ann", "t_ann")], by = "site.id", all.x = TRUE)
+## ALPHA DIVERSITY PATTERNS 
+OTU_mat_df <- melt(OTU_mat_list, varnames = c("OTU_ID", "site_id"),
+                   value.name = "nReads")
 
-# Count number of unique OTUs per site
-site_nsp <- ddply(.data = subset(OTU_clim_df, nReads > 0), .variables = .(site.id), .fun = function(x) {data.frame(nsp = length(unique(x$OTU_ID)))}) 
-write.csv(site_nsp, file.path(res.dir, "site_nsp.csv"), row.names = F)
+OTU_mat_nsp <- ddply(subset(OTU_mat_df, nReads > 0), .variables = .(L1, site_id),
+                     .fun = function(x) {data.frame(nsp = length(as.vector(unique(x$OTU_ID))))},
+                     .progress = "text")
 
-# Remove OTUs with fewer than 10 sites
-removeLowOcc <- function(data){
-  if(sum(data$nReads > 0) >= 10){
-    return(data)
-  }
+OTU_mat_nsp_site <- merge(x = OTU_mat_nsp, y = siteData, by.x = "site_id", by.y= "site.id", all.x = T)
+saveRDS(OTU_mat_nsp_site, file.path(res.dir, "OTU_nsp_site.rds"))
+
+## NMDS =========
+OTU_mat_avg_df <- ddply(OTU_mat_df, .variables = .(site_id, OTU_ID), summarize, avgRead = mean(nReads), .progress = "text")
+
+OTU_mat_avg <- reshape2::acast(OTU_mat_avg_df, formula = site_id~OTU_ID, value.var = "avgRead")
+
+site_nmds<- metaMDS(OTU_mat_avg, k = 2)
+
+site_nmds_contour <- ordisurf(site_nmds, site_nmds_df2$elevation)
+extract.xyz <- function(obj) {
+  xy <- expand.grid(x = obj$grid$x, y = obj$grid$y)
+  xyz <- cbind(xy, c(obj$grid$z))
+  names(xyz) <- c("x", "y", "z")
+  return(xyz)
 }
-OTU_clim_df2 <- ddply(.data = OTU_clim_df, .variables = .(site, OTU_ID), .fun = removeLowOcc)
+site_nmds_contour2 <- extract.xyz(site_nmds_contour)
 
-# Calculate niche and niche width for each OTU for each site
-OTU_clim_site <- ddply(.data = OTU_clim_df2, .variables = .(site, OTU_ID), .fun = findLimits)
+site_nmds_df <- data.frame(site_nmds$points)
+site_nmds_df$site.id <- rownames(site_nmds$points)
+site_nmds_df2 <- merge(site_nmds_df, siteData)
 
-# Flag OTUs whose range boundaries are outside the sampling ranges for each site ( 1 = in bounds, 0 = out of bounds; since upper and lower bounds are 0.75 and 0.25; not more than a quarter of occurrences may be at the most extreme site)
-OTU_clim_site$rf_bounds <- with(data = OTU_clim_site,
-                                ifelse(site == "Laupahoehoe" & rf_upper >= 4402.763 |
-                                       site == "Laupahoehoe" & rf_lower <= 2840.776 | 
-                                       site == "Stainback" & rf_upper >= 6388.352 |
-                                       site == "Stainback" & rf_lower <= 2480.524, 0, 1))
+species_nmds_df <- data.frame(hello_mds$species)
+species_nmds_df$species <- rownames(hello_mds$species)
 
-OTU_clim_site$temp_bounds <- with(data = OTU_clim_site, 
-                               ifelse(site == "Laupahoehoe" & temp_upper >= 17.89003 |
-                                      site == "Laupahoehoe" &  temp_lower <= 13.54576 |
-                                      site == "Stainback" & temp_upper >= 18.16707 |
-                                      site == "Stainback" & temp_lower <= 12.28192, 0, 1))
+write.csv(site_nmds_df2, file.path(res.dir, "site_nmds.csv"), row.names = F)
+write.csv(site_nmds_contour2, file.path(res.dir, "site_nmds_contour.csv"), row.names = F)
 
-table(OTU_clim_site$rf_bounds)
-table(OTU_clim_site$temp_bounds)
+## ABUNDANCE PATTERNS =========
+t_res_list_t10 <- list()
+rf_res_list_t10 <- list()
+t_res_list_t5 <- list()
+rf_res_list_t5 <- list()
 
-# Calculate niche breadth
-OTU_clim_site$temp_breadth <- OTU_clim_site$temp_upper - OTU_clim_site$temp_lower
-OTU_clim_site$rf_breadth <- OTU_clim_site$rf_upper - OTU_clim_site$rf_lower
+for(i in 1:length(OTU_mat_list)){
+  #i = 1
+  # Counter
+  pb = txtProgressBar(min = 0, max = length(OTU_mat_list), style = 3, initial = 0) 
+  setTxtProgressBar(pb, i)
 
-# Only include species in both sites
-bothSites <- function(x){
-  if(sum(c("Laupahoehoe", "Stainback") %in% x$site) == 2){
+  OTU_mat <- OTU_mat_list[[i]]
+  
+  # Only analyze OTUs that have been matched to certain orders
+  targetOrders <- c("Acari", "Araneae", "Coleoptera", "Lepidoptera", "Orthoptera", "Neuroptera", "Psocoptera", "Hemiptera")
+  #<- c("Araneae", "Hemiptera", "Lepidoptera", "Psocoptera", "Coleoptera", "Orthoptera")
+  otu_target <- which(taxonData$V4[match(rownames(OTU_mat), taxonData$OTU_ID)] %in% targetOrders)
+  
+  # Convert OTU matrix into long table format
+  OTU_df <- melt(data = OTU_mat[otu_target,], value.name = "nReads", varnames = c("OTU_ID", "site.id"))
+  
+  # Combine OTU table with site climatic data
+  OTU_clim_df <- merge(x = OTU_df, y = siteData[c("site","site.id", "rf_ann", "t_ann")], by = "site.id", all.x = TRUE)
+  
+  # Remove OTUs with fewer than 10 sites on each gradient
+  removeLowOcc <- function(data, threshold){
+    if(sum(data$nReads > 0) >= threshold){
+      return(data)
+    }
+  }
+  OTU_clim_df2_10 <- ddply(.data = OTU_clim_df, .variables = .(site, OTU_ID), .fun = removeLowOcc, threshold = 10)  
+  OTU_clim_df2_5 <- ddply(.data = OTU_clim_df, .variables = .(site, OTU_ID), .fun = removeLowOcc, threshold = 5) 
+  
+  # Calculate niche and niche width for each OTU for each site
+  calcNiche <- function(x){
+    rf_v <- rep(x$rf_ann, x$nReads)
+    temp_v <- rep(x$t_ann, x$nReads)
+    rf_q <- quantile(rf_v, probs = c(0.25, 0.5, 0.75))
+    temp_q <- quantile(temp_v, probs = c(0.25, 0.5, 0.75))
+     
+    # Niche position
+    temp_median <- temp_q[2]
+    rf_median <- rf_q[2]
+    
+    # Niche breadth
+    temp_upper <- temp_q[3]
+    temp_lower <- temp_q[1]
+    temp_breadth <- temp_upper - temp_lower
+    
+    rf_upper <- rf_q[3]
+    rf_lower <- rf_q[1]
+    rf_breadth <- rf_upper - rf_lower
+    
+    data.frame(temp_lower, temp_upper, temp_median, temp_breadth, rf_lower, rf_upper, rf_median, rf_breadth)
+  }
+  OTU_clim_site_10 <- ddply(.data = OTU_clim_df2_10, .variables = .(site, OTU_ID), .fun = calcNiche)
+  OTU_clim_site_5 <- ddply(.data = OTU_clim_df2_5, .variables = .(site, OTU_ID), .fun = calcNiche)
+  
+  # Flag OTUs whose range boundaries are outside the sampling ranges for each site ( 1 = in bounds, 0 = out of bounds; since upper and lower bounds are 0.75 and 0.25; not more than a quarter of occurrences may be at the most extreme site)
+  flagLimit <- function(x){
+    x$rf_bounds <- with(data = x,
+                        ifelse(site == "Laupahoehoe" & rf_upper >= 4402.763 |
+                            site == "Laupahoehoe" & rf_lower <= 2840.776 | 
+                            site == "Stainback" & rf_upper >= 6388.352 |
+                            site == "Stainback" & rf_lower <= 2480.524, 0, 1))
+    x$temp_bounds <- with(data = x,
+                          ifelse(site == "Laupahoehoe" & temp_upper >= 17.89003 |
+                                   site == "Laupahoehoe" &  temp_lower <= 13.54576 |
+                                   site == "Stainback" & temp_upper >= 18.16707 |
+                                   site == "Stainback" & temp_lower <= 12.28192, 0, 1))
     return(x)
-  } else {
-    return(NULL)
   }
+  OTU_clim_site_10 <- flagLimit(x = OTU_clim_site_10)
+  OTU_clim_site_5 <- flagLimit(x = OTU_clim_site_5)
+  #OTU_clim_site$rf_bounds <- with(data = OTU_clim_site,
+  #                                 ifelse(site == "Laupahoehoe" & rf_upper >= 4402.763 |
+  #                                          site == "Laupahoehoe" & rf_lower <= 2840.776 | 
+  #                                          site == "Stainback" & rf_upper >= 6388.352 |
+  #                                          site == "Stainback" & rf_lower <= 2480.524, 0, 1))
+  # 
+  # OTU_clim_site$temp_bounds <- with(data = OTU_clim_site, 
+  #                                   ifelse(site == "Laupahoehoe" & temp_upper >= 17.89003 |
+  #                                            site == "Laupahoehoe" &  temp_lower <= 13.54576 |
+  #                                            site == "Stainback" & temp_upper >= 18.16707 |
+  #                                            site == "Stainback" & temp_lower <= 12.28192, 0, 1))
+  # 
+  # table(OTU_clim_site_10$rf_bounds)
+  # table(OTU_clim_site_10$temp_bounds)
+  # table(OTU_clim_site_5$rf_bounds)
+  # table(OTU_clim_site_5$temp_bounds)
+  
+  
+  # Only include species in both sites
+  bothSites <- function(x){
+    if(sum(c("Laupahoehoe", "Stainback") %in% x$site) == 2){
+      return(x)
+    } else {
+      return(NULL)
+    }
+  }
+  
+  t_res_list_t10[[i]] <- ddply(.data =  subset(OTU_clim_site_10, temp_bounds == 1),
+                         .variables = .(OTU_ID), .fun = bothSites)
+  rf_res_list_t10[[i]] <- ddply(.data = subset(OTU_clim_site_10, rf_bounds == 1),
+                           .variables = .(OTU_ID), .fun = bothSites)
+  t_res_list_t5[[i]] <- ddply(.data =  subset(OTU_clim_site_5, temp_bounds == 1),
+                               .variables = .(OTU_ID), .fun = bothSites)
+  rf_res_list_t5[[i]] <- ddply(.data = subset(OTU_clim_site_5, rf_bounds == 1),
+                                .variables = .(OTU_ID), .fun = bothSites)
+  
+}
+close(pb)
+
+
+## QUESTION 1: ARE NICHES CONSERVED ACROSS SITES? ========
+nicheConsPrep <- function(x, value, otu_tab){
+  site <- dcast(data = x, formula = OTU_ID~site, value.var = value)
+  site_OTU <- merge(site, otu_tab)
+  return(site_OTU)
 }
 
-t_res <- ddply(.data =  subset(OTU_clim_site, temp_bounds == 1), .variables = .(OTU_ID), .fun = bothSites)
-rf_res <- ddply(.data = subset(OTU_clim_site, rf_bounds == 1), .variables = .(OTU_ID), .fun = bothSites)
+t_med_res_prep_t10  <- llply(.data = t_res_list_t10, .fun = nicheConsPrep, value = "temp_median", otu_tab = OTUtaxonData)
+rf_med_res_prep_t10  <- llply(.data = rf_res_list_t10, .fun = nicheConsPrep, value = "rf_median", otu_tab = OTUtaxonData)
 
-OTU_taxonref <- taxonData[c("OTU_ID","V4")]
-OTU_taxonref <- OTU_taxonref[!duplicated(OTU_taxonref),]
+saveRDS(t_med_res_prep_t10, file.path(res.dir, "t_med_res_prep_t10.rds"))
+saveRDS(rf_med_res_prep_t10, file.path(res.dir, "rf_med_res_prep_t10.rds"))
+
+nicheConsTest <- function(x){
+  cor_test_res <- cor.test(x = x$Laupahoehoe, y = x$Stainback)
+  t <- cor_test_res$statistic
+  cor <- cor_test_res$estimate
+  p <- cor_test_res$p.value
+  n <- nrow(x)
+  data.frame(t, cor, p, n)
+}
+
+t_med_res_final_t10 <- ldply(.data = t_med_res_prep_t10, .fun = nicheConsTest)
+rf_med_res_final_t10 <- ldply(.data = rf_med_res_prep_t10, .fun = nicheConsTest)
+
+write.csv(t_med_res_final_t10, file.path(res.dir, "t_med_res_final_t10.csv"), row.names = T)
+write.csv(rf_med_res_final_t10, file.path(res.dir, "rf_med_res_final_t10.csv"), row.names = T)
+
+round(mean(t_med_res_final_t10$cor), 2)
+round(range(t_med_res_final_t10$cor), 2)
+sum(t_med_res_final_t10$p < 0.05) / 100
+round(range(t_med_res_final_t10$n),2 )
+
+round(mean(rf_med_res_final_t10$cor), 2)
+round(range(rf_med_res_final_t10$cor), 2)
+sum(rf_med_res_final_t10$p < 0.05) / 100
+round(range(rf_med_res_final_t10$n), 1)
+
+# Re-run analysis with lower site treshold
+t_med_res_prep_t5  <- llply(.data = t_res_list_t5, .fun = nicheConsPrep, value = "temp_median", otu_tab = OTUtaxonData)
+rf_med_res_prep_t5  <- llply(.data = rf_res_list_t5, .fun = nicheConsPrep, value = "rf_median", otu_tab = OTUtaxonData)
+
+saveRDS(t_med_res_prep_t5, file.path(res.dir, "t_med_res_prep_t5.rds"))
+saveRDS(rf_med_res_prep_t5, file.path(res.dir, "rf_med_res_prep_t5.rds"))
+
+t_med_res_final_t5 <- ldply(.data = t_med_res_prep_t5, .fun = nicheConsTest)
+rf_med_res_final_t5 <- ldply(.data = rf_med_res_prep_t5, .fun = nicheConsTest)
+
+write.csv(t_med_res_final_t5, file.path(res.dir, "t_med_res_final_t5.csv"), row.names = T)
+write.csv(rf_med_res_final_t5, file.path(res.dir, "rf_med_res_final_t5.csv"), row.names = T)
+
+round(mean(t_med_res_final_t5$cor), 2)
+round(range(t_med_res_final_t5$cor), 2)
+sum(t_med_res_final_t5$p < 0.05) / 100
+round(range(t_med_res_final_t5$n),2 )
+
+round(mean(rf_med_res_final_t5$cor), 2)
+round(range(rf_med_res_final_t5$cor), 2)
+sum(rf_med_res_final_t5$p < 0.05) / 100
+round(range(rf_med_res_final_t5$n), 1)
+
+# Re-run analysis with OTU that occur in ALL rarefied datasets
+t_med_res_prep_all_t10 <- do.call("rbind",t_med_res_prep_t10)
+rf_med_res_prep_all_t10 <- do.call("rbind",rf_med_res_prep_t10)
+
+t_med_res_prep_all_t5 <- do.call("rbind",t_med_res_prep_t5)
+rf_med_res_prep_all_t5 <- do.call("rbind",rf_med_res_prep_t5)
+
+t_med_res_prep_all_subset_t10 <- ddply(.data = t_med_res_prep_all_t10,
+                               .variables = .(OTU_ID),
+                               .fun = function(x) {if(nrow(x) == 100){return(x)} })
+rf_med_res_prep_all_subset_t10 <- ddply(.data = rf_med_res_prep_all_t10,
+                                .variables = .(OTU_ID),
+                                .fun = function(x) {if(nrow(x) == 100){return(x)} })
+
+t_med_res_prep_all_subset_t5 <- ddply(.data = t_med_res_prep_all_t5,
+                                       .variables = .(OTU_ID),
+                                       .fun = function(x) {if(nrow(x) == 100){return(x)} })
+rf_med_res_prep_all_subset_t5 <- ddply(.data = rf_med_res_prep_all_t5,
+                                        .variables = .(OTU_ID),
+                                        .fun = function(x) {if(nrow(x) == 100){return(x)} })
 
 
-## Question 1: Are niches conserved across sites?
-t_med_site <- dcast(data = t_res, formula = OTU_ID~site, value.var = "temp_median")
-rf_med_site <- dcast(data = rf_res, formula = OTU_ID~site, value.var = "rf_median")
+t_med_res_prep_avg_t10 <- ddply(.data = t_med_res_prep_all_subset_t10,
+                        .variables = .(OTU_ID),
+                        .fun = summarize, 
+                        Stainback = mean(Stainback),
+                        Laupahoehoe = mean(Laupahoehoe),
+                        V4 = V4[1])
+rf_med_res_prep_avg_t10  <- ddply(.data = rf_med_res_prep_all_subset_t10,
+                          .variables = .(OTU_ID),
+                          .fun = summarize, 
+                          Stainback = mean(Stainback),
+                          Laupahoehoe = mean(Laupahoehoe),
+                          V4 = V4[1])
 
-t_med_site <- merge(t_res_site, OTU_taxonref)
-rf_med_site <- merge(rf_res_site, OTU_taxonref)
+t_med_res_prep_avg_t5 <- ddply(.data = t_med_res_prep_all_subset_t5,
+                                .variables = .(OTU_ID),
+                                .fun = summarize, 
+                                Stainback = mean(Stainback),
+                                Laupahoehoe = mean(Laupahoehoe),
+                                V4 = V4[1])
+rf_med_res_prep_avg_t5  <- ddply(.data = rf_med_res_prep_all_subset_t5,
+                                  .variables = .(OTU_ID),
+                                  .fun = summarize, 
+                                  Stainback = mean(Stainback),
+                                  Laupahoehoe = mean(Laupahoehoe),
+                                  V4 = V4[1])
 
-write.csv(t_med_site, file.path(res.dir, "t_median_site.csv"), row.names = FALSE)
-write.csv(rf_med_site, file.path(res.dir, "rf_median_site.csv"), row.names = FALSE)
+write.csv(t_med_res_prep_avg_t10, file.path(res.dir, "t_med_res_prep_avg_t10.csv"), row.names = T)
+write.csv(rf_med_res_prep_avg_t10, file.path(res.dir, "rf_med_res_prep_avg_t10.csv"), row.names = T)
 
-cor.test(x = t_med_site$Laupahoehoe, y = t_med_site$Stainback)
-cor.test(x = rf_med_site$Laupahoehoe, y = rf_med_site$Stainback)
+write.csv(t_med_res_prep_avg_t5, file.path(res.dir, "t_med_res_prep_avg_t5.csv"), row.names = T)
+write.csv(rf_med_res_prep_avg_t5, file.path(res.dir, "rf_med_res_prep_avg_t5.csv"), row.names = T)
 
-## Question 2: Is niche breadth correlated across sites?
-t_breadth_site <- dcast(data = t_res, formula = OTU_ID~site, value.var = "temp_breadth")
-rf_breadth_site <- dcast(data = rf_res, formula = OTU_ID~site, value.var = "rf_breadth")
+nicheConsTest(t_med_res_prep_avg_t10)
+nicheConsTest(rf_med_res_prep_avg_t10)
+nicheConsTest(t_med_res_prep_avg_t5)
+nicheConsTest(rf_med_res_prep_avg_t5)
 
-t_breadth_site <- merge(t_breadth_site, OTU_taxonref)
-rf_breadth_site <- merge(rf_breadth_site, OTU_taxonref)
+## QUESTION 2: IS NICHE BREADTH CONSERVED ACROSS SITES? ========
 
-cor.test(x = t_breadth_site$Laupahoehoe, y = t_breadth_site$Stainback)
-cor.test(x = rf_breadth_site$Laupahoehoe, y = rf_breadth_site$Stainback)
+t_bdt_res_prep_t10 <- llply(.data = t_res_list_t10,
+      .fun = nicheConsPrep, value = "temp_breadth", otu_tab = OTUtaxonData)
+rf_bdt_res_prep_t10 <- llply(.data = rf_res_list_t10,
+                        .fun = nicheConsPrep, value = "rf_breadth", otu_tab = OTUtaxonData)
+saveRDS(t_bdt_res_prep_t10, file.path(res.dir, "t_bdt_res_prep_t10.rds"))
+saveRDS(rf_bdt_res_prep_t10, file.path(res.dir, "rf_bdt_res_prep_t10.rds"))
 
-write.csv(t_breadth_site, file.path(res.dir, "t_breadth_site.csv"), row.names = FALSE)
-write.csv(rf_breadth_site, file.path(res.dir, "rf_breadth_site.csv"), row.names = FALSE)
+t_bdt_res_final_t10 <- ldply(.data = t_bdt_res_prep_t10, .fun = nicheConsTest)
+rf_bdt_res_final_t10 <- ldply(.data = rf_bdt_res_prep_t10, .fun = nicheConsTest)
 
-## Question 3: Is niche breadth higher in one site
-mod <- lm(temp_breadth ~ site, data = merge(t_res, OTU_taxonref))
-summary(mod)
+round(mean(t_bdt_res_final_t10$cor), 2)
+round(range(t_bdt_res_final_t10$cor), 2)
+sum(t_bdt_res_final_t10$p < 0.05) / 100
+round(range(t_bdt_res_final_t10$n), 2)
 
-library(lmerTest)
-library(lme4)
-mod <- lmer(temp_breadth ~ site + (1|V4), data = merge(t_res, OTU_taxonref))
-summary(mod)
-mod2 <- lmer(temp_breadth ~ site + (1|V4), data = merge(t_res, OTU_taxonref))
-summary(mod2)
-anova(mod2,mod)
-# Higher in Stainback
+round(mean(rf_bdt_res_final_t10$cor), 2)
+round(range(rf_bdt_res_final_t10$cor), 2)
+sum(rf_bdt_res_final_t10$p < 0.05) / 100
+round(range(rf_bdt_res_final_t10$n), 2)
 
-## Question 4: Is niche breadth higher across groups
-mod <- lm(temp_breadth ~ V4, data = subset(merge(t_res, OTU_taxonref), site == "Laupahoehoe"))
-summary(mod)
-mod2 <- lm(temp_breadth ~ V4, data = subset(merge(t_res, OTU_taxonref), site == "Stainback"))
-summary(mod2)
+# Re-run analysis with a lower site threshold
+t_bdt_res_prep_t5 <- llply(.data = t_res_list_t5,
+                            .fun = nicheConsPrep, value = "temp_breadth", otu_tab = OTUtaxonData)
+rf_bdt_res_prep_t5 <- llply(.data = rf_res_list_t5,
+                             .fun = nicheConsPrep, value = "rf_breadth", otu_tab = OTUtaxonData)
+saveRDS(t_bdt_res_prep_t5, file.path(res.dir, "t_bdt_res_prep_t5.rds"))
+saveRDS(rf_bdt_res_prep_t5, file.path(res.dir, "rf_bdt_res_prep_t5.rds"))
 
-mod <- lm(rf_breadth ~ V4, data = subset(merge(rf_res, OTU_taxonref), site == "Laupahoehoe"))
-summary(mod)
-mod2 <- lm(rf_breadth ~ V4, data = subset(merge(rf_res, OTU_taxonref), site == "Stainback"))
-summary(mod2)
+t_bdt_res_final_t5 <- ldply(.data = t_bdt_res_prep_t5, .fun = nicheConsTest)
+rf_bdt_res_final_t5 <- ldply(.data = rf_bdt_res_prep_t5, .fun = nicheConsTest)
+
+round(mean(t_bdt_res_final_t5$cor), 2)
+round(range(t_bdt_res_final_t5$cor), 2)
+sum(t_bdt_res_final_t5$p < 0.05) / 100
+round(range(t_bdt_res_final_t5$n), 2)
+
+round(mean(rf_bdt_res_final_t5$cor), 2)
+round(range(rf_bdt_res_final_t5$cor), 2)
+sum(rf_bdt_res_final_t5$p < 0.05) / 100
+round(range(rf_bdt_res_final_t5$n), 2)
+
+# Re-run analysis with OTU that occur in ALL rarefied datasets
+t_bdt_res_prep_all_t10 <- do.call("rbind",t_bdt_res_prep_t10)
+rf_bdt_res_prep_all_t10 <- do.call("rbind", rf_bdt_res_prep_t10)
+
+t_bdt_res_prep_all_t5 <- do.call("rbind",t_bdt_res_prep_t5)
+rf_bdt_res_prep_all_t5 <- do.call("rbind", rf_bdt_res_prep_t5)
+
+t_bdt_res_prep_all_subset_t10 <- ddply(.data = t_bdt_res_prep_all_t10,
+                                   .variables = .(OTU_ID),
+                                   .fun = function(x) {if(nrow(x) == 100){return(x)} })
+rf_bdt_res_prep_all_subset_t10 <- ddply(.data = rf_bdt_res_prep_all_t10,
+                                    .variables = .(OTU_ID),
+                                    .fun = function(x) {if(nrow(x) == 100){return(x)} })
+
+t_bdt_res_prep_all_subset_t5 <- ddply(.data = t_bdt_res_prep_all_t5,
+                                       .variables = .(OTU_ID),
+                                       .fun = function(x) {if(nrow(x) == 100){return(x)} })
+rf_bdt_res_prep_all_subset_t5 <- ddply(.data = rf_bdt_res_prep_all_t5,
+                                        .variables = .(OTU_ID),
+                                        .fun = function(x) {if(nrow(x) == 100){return(x)} })
+
+t_bdt_res_prep_avg_t10 <- ddply(.data = t_bdt_res_prep_all_subset_t10,
+                            .variables = .(OTU_ID),
+                            .fun = summarize, 
+                            Stainback = mean(Stainback),
+                            Laupahoehoe = mean(Laupahoehoe),
+                            V4 = V4[1])
+rf_bdt_res_prep_avg_t10  <- ddply(.data = rf_bdt_res_prep_all_subset_t10,
+                              .variables = .(OTU_ID),
+                              .fun = summarize, 
+                              Stainback = mean(Stainback),
+                              Laupahoehoe = mean(Laupahoehoe),
+                              V4 = V4[1])
+
+t_bdt_res_prep_avg_t5 <- ddply(.data = t_bdt_res_prep_all_subset_t5,
+                                .variables = .(OTU_ID),
+                                .fun = summarize, 
+                                Stainback = mean(Stainback),
+                                Laupahoehoe = mean(Laupahoehoe),
+                                V4 = V4[1])
+rf_bdt_res_prep_avg_t5  <- ddply(.data = rf_bdt_res_prep_all_subset_t5,
+                                  .variables = .(OTU_ID),
+                                  .fun = summarize, 
+                                  Stainback = mean(Stainback),
+                                  Laupahoehoe = mean(Laupahoehoe),
+                                  V4 = V4[1])
+
+write.csv(t_bdt_res_prep_avg_t10, file.path(res.dir, "t_bdt_res_prep_avg_t10.csv"), row.names = T)
+write.csv(rf_bdt_res_prep_avg_t10, file.path(res.dir, "rf_bdt_res_prep_avg_t10.csv"), row.names = T)
+
+write.csv(t_bdt_res_prep_avg_t5, file.path(res.dir, "t_bdt_res_prep_avg_t5.csv"), row.names = T)
+write.csv(rf_bdt_res_prep_avg_t5, file.path(res.dir, "rf_bdt_res_prep_avg_t5.csv"), row.names = T)
+
+nicheConsTest(t_bdt_res_prep_avg_t10)
+nicheConsTest(rf_bdt_res_prep_avg_t10)
+
+nicheConsTest(t_bdt_res_prep_avg_t5)
+nicheConsTest(rf_bdt_res_prep_avg_t5)
+
+## QUESTION 3: IS NICHE BREADTH / POSITION HIGHER ACROSS TAXONOMIC GROUPS? =====================
+rf_bdt_melt_t10 <- melt(rf_bdt_res_prep_avg_t10, id.vars = c("OTU_ID", "V4"),
+     variable.name = c("Site"),
+     measure.vars = c("Stainback", "Laupahoehoe"),
+     value.name = c("rf_breadth"))
+
+rf_bdt_melt_t5 <- melt(rf_bdt_res_prep_avg_t5, id.vars = c("OTU_ID", "V4"),
+                        variable.name = c("Site"),
+                        measure.vars = c("Stainback", "Laupahoehoe"),
+                        value.name = c("rf_breadth"))
+
+t_bdt_melt_t10 <- melt(t_bdt_res_prep_avg_t10, id.vars = c("OTU_ID", "V4"),
+                       variable.name = c("Site"),
+                       measure.vars = c("Stainback", "Laupahoehoe"),
+                       value.name = c("t_breadth"))
+
+t_bdt_melt_t5 <- melt(t_bdt_res_prep_avg_t5, id.vars = c("OTU_ID", "V4"),
+                      variable.name = c("Site"),
+                      measure.vars = c("Stainback", "Laupahoehoe"),
+                      value.name = c("t_breadth"))
+
+write.csv(rf_bdt_melt_t10, file = file.path(res.dir, "rf_bdt_melt_t10.csv"), row.names = FALSE)
+write.csv(rf_bdt_melt_t5, file = file.path(res.dir, "rf_bdt_melt_t5.csv"), row.names = FALSE)
+write.csv(t_bdt_melt_t10, file = file.path(res.dir, "t_bdt_melt_t10.csv"), row.names = FALSE)
+write.csv(t_bdt_melt_t5, file = file.path(res.dir, "t_bdt_melt_t5.csv"), row.names = FALSE)
+
+summary(lm(rf_breadth ~ V4, data = subset(rf_bdt_melt_t10, Site == "Laupahoehoe")))
+summary(lm(rf_breadth ~ V4, data = subset(rf_bdt_melt_t10, Site == "Stainback")))
+summary(lm(rf_breadth ~ V4, data = subset(rf_bdt_melt_t5, Site == "Laupahoehoe")))
+summary(lm(rf_breadth ~ V4, data = subset(rf_bdt_melt_t5, Site == "Stainback")))
+
+summary(lm(t_breadth ~ V4, data = subset(t_bdt_melt_t10, Site == "Laupahoehoe")))
+summary(lm(t_breadth ~ V4, data = subset(t_bdt_melt_t10, Site == "Stainback")))
+summary(lm(t_breadth ~ V4, data = subset(t_bdt_melt_t5, Site == "Laupahoehoe")))
+summary(lm(t_breadth ~ V4, data = subset(t_bdt_melt_t5, Site == "Stainback")))
+
+var.test(x= subset(rf_bd_melt_t10, V4 == "Lepidoptera")$rf_breadth, y = subset(rf_bd_melt_t10, V4 == "Coleoptera")$rf_breadth)
+
+# just isn't enough data to test
+table(subset(t_bdt_melt_t5, Site == "Laupahoehoe")$V4)
+table(subset(t_bdt_melt_t10, Site == "Laupahoehoe")$V4)
+
+#
+summary(lm(t_breadth ~ V4, data = subset(t_bdt_melt_t10, Site == "Laupahoehoe")))
+summary(lm(t_breadth ~ V4, data = subset(t_bdt_melt_t10, Site == "Stainback")))
+summary(lm(t_breadth ~ V4 + Site, data = t_bdt_melt_t5))
+summary(lm(t_breadth ~ V4, data = subset(t_bdt_melt_t5, Site == "Stainback")))
+
+
+
+
+rf_bdt_melt_t5 <- read.csv(file = file.path(res.dir, "rf_bdt_melt_t5.csv"))
+t_bdt_melt_t5 <- read.csv(file = file.path(res.dir, "t_bdt_melt_t5.csv"))
+
+
+pairwise.var.test <- function (x, g, p.adjust.method = "bonferroni", ...) {
+  # Modified from pairwise.wilcox.test
+  p.adjust.method <- match.arg(p.adjust.method)
+  DNAME <- paste(deparse(substitute(x)), "and", deparse(substitute(g)))
+  g <- factor(g)
+  
+  compare.levels <- function(i, j) {
+    xi <- x[as.integer(g) == i]
+    xj <- x[as.integer(g) == j]
+    var.test(xi, xj, ...)$p.value
+  }
+  #PVAL <- pairwise.table(compare.levels, levels(g), p.adjust.method)
+  PVAL2 <- pairwise.table2(compare.levels, levels(g))
+  ans <- list(data.name = DNAME, p.value.adj = PVAL, p.value = PVAL2,
+              p.adjust.method = p.adjust.method)
+  ans
+}
+
+pairwise.table2 <- function (compare.levels, level.names, p.adjust.method) {
+  ix <- setNames(seq_along(level.names), level.names)
+  pp <- outer(ix[-1L], ix[-length(ix)], function(ivec, jvec) sapply(seq_along(ivec), 
+                                                                    function(k) {
+                                                                      i <- ivec[k]
+                                                                      j <- jvec[k]
+                                                                      if (i > j) 
+                                                                        compare.levels(i, j)
+                                                                      else NA
+                                                                    }))
+  #pp[lower.tri(pp, TRUE)] <- p.adjust(pp[lower.tri(pp, FALSE)], 
+  #                                    p.adjust.method)
+  return(pp)
+}
+
+pairwise.var.test(subset(rf_bdt_melt_t5, Site == "Laupahoehoe")$rf_breadth, subset(rf_bdt_melt_t5, Site == "Laupahoehoe")$V4)
+pairwise.var.test(subset(t_bdt_melt_t5, Site == "Laupahoehoe")$t_breadth, subset(t_bdt_melt_t5, Site == "Laupahoehoe")$V4)
+pairwise.var.test(subset(t_bdt_melt_t5, Site == "Stainback")$t_breadth, subset(t_bdt_melt_t5, Site == "Stainback")$V4)
 

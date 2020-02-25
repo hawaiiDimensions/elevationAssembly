@@ -9,11 +9,10 @@ library(reshape2)
 library(picante)
 
 ## IMPORT DATA ===============
-main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/"
-analysis.dir <- file.path(main.dir, "elevationAssemblyHawaii")
+main.dir <- "~/Dropbox/projects/2017/hawaiiCommunityAssembly/elevationAssemblyHawaii"
 data.dir <- file.path(main.dir, "data")
 fig.dir <- file.path(main.dir, "figures")
-source(file.path(analysis.dir, "metabarcodingTools.R"))
+source(file.path(main.dir, "metabarcodingTools.R"))
 
 # Import site and otu tables
 siteData <- read.csv(file.path(data.dir, "clim.final.csv"))
@@ -46,58 +45,73 @@ arfOTU <- cleanOTUdata(dataARFmelt)
 mcoOTU <- cleanOTUdata(dataMCOmelt)
 
 ## RAREFY DATA BY SIZE CATEGORY AND SITE ===============
-# Checking rarefaction procedure
-# 17 site by size category groupings have fewer reads than expected
-# sumReads <- function(df){
-#   totalReads <- sum(df$nReads)
-#   rarefiedReads <- nrow(subset(df, nReads > 0)) * 20
-#     
-#   #subset(df, Site_ID == unique(df$Site_ID) &
-#   #                          SizeCategory == unique(df$SizeCategory))$Count * 20
-#   return(data.frame(totalReads, rarefiedReads))
-# }
-# 
-# # Determine the number of reads to rarefy from each site and size
-# test <- ddply(.data = megaData, .var = .(SizeCategory, Site_ID), .fun = sumReads)
-# test2 <- test[test$totalReads < test$rarefiedReads,]
-
 # Rarefy datasets
+# Use the number of specimen counts in each size category to rarefy
 # Samples where there are fewer reads than expected will be left unrarefied (only 17 site by size groupings)
 # ARF and MCO are rarefied separately and then combined
+
 nreps <- 100
 arf_rarefied <- list()
 mco_rarefied <- list()
 
+#arfOTU <- subset(arfOTU, nReads >= 10) # remove OTU with less than 10 reads (possible contamination?)
+#mcoOTU <- subset(mcoOTU, nReads >= 10)
+
+arfOTU_summary <- ddply(.data =  arfOTU, .var = .(SizeCategory,Site_ID),.fun = summarize, arfTotalReads = sum(nReads))
+mcoOTU_summary <- ddply(.data =  mcoOTU, .var = .(SizeCategory,Site_ID),.fun = summarize, mcoTotalReads = sum(nReads))
+
+arfOTU_summary2 <- merge(arfOTU_summary, specimenCounts)
+mcoOTU_summary2 <- merge(mcoOTU_summary, specimenCounts)
+
+sum(mcoOTU_summary2$arfTotalReads < (mcoOTU_summary2$Count * 7)) # all samples have enough reads for rarefaction
+sum(mcoOTU_summary2$arfTotalReads < (mcoOTU_summary2$Count * 8)) # all samples have enough reads for rarefaction
+
+sum(arfOTU_summary2$arfTotalReads < (mcoOTU_summary2$Count * 7)) # all samples have enough reads for rarefaction
+sum(arfOTU_summary2$arfTotalReads < (mcoOTU_summary2$Count * 8)) # 4 samples have too few reads for rarefaction at the same level as other samples
+
 for(i in 1:nreps){
+  pb = txtProgressBar(min = 0, max = nreps, style = 3, initial = 0) 
+  setTxtProgressBar(pb, i)
   arf_rarefied[[i]] <- ddply(.data = arfOTU,
-                             .var = .(SizeCategory,Site_ID),
+                             .var = .(SizeCategory, Site_ID),
                              .fun = rarefyOTUbySpecimenCount,
                              counts = specimenCounts,
-                             readsPerIndividual = 10,
-                             .progress = "text")
+                             readsPerIndividual = 7)
+                             #.progress = "text",
+                             #.parallel = T)
   mco_rarefied[[i]] <- ddply(.data = mcoOTU,
                              .var = .(SizeCategory,Site_ID),
                              .fun = rarefyOTUbySpecimenCount,
                              counts = specimenCounts,
-                             readsPerIndividual = 10,
-                             .progress = "text")
+                             readsPerIndividual = 7)
+                             #.progress = "text",
+                             #.parallel = T)
 }
+close(pb)
 
-# Combine data
-combData <- ddply(merge(arf_rarefied[[1]],
-                        mco_rarefied[[1]], all.x=TRUE), 
-                  .variables = .(X.OTU.ID, Site_SizeCategory),
-                  summarise, rarefiedReadAbund=sum(rarefiedReadAbund), .progress = "text")
-combData_clean <- cleanOTUdata(combData)
-head(combData_clean)
-saveRDS(combData_clean, file.path(data.dir, "combinedOTUdata.rds"))
+saveRDS(arf_rarefied, file = file.path(data.dir, "arf_rarefied.rds"))
+saveRDS(mco_rarefied, file = file.path(data.dir, "mco_rarefied.rds"))
+
+# arf_rarefied <- readRDS(file.path(data.dir, "arf_rarefied.rds"))
+# mco_rarefied <- readRDS(file.path(data.dir, "arf_rarefied.rds"))
+
+combinedOTU.dir <- file.path(data.dir, "combinedOTU")
+for(i in 1:nreps){
+  pb = txtProgressBar(min = 0, max = nreps, style = 3, initial = 0) 
+  setTxtProgressBar(pb, i)
+  temp <- merge(arf_rarefied[[i]],
+                mco_rarefied[[i]], all.x = TRUE)
+  combined <- ddply(temp, .variables = .(X.OTU.ID, Site_SizeCategory),
+                                  summarize, rarefiedReadAbund = sum(rarefiedReadAbund))
+  saveRDS(cleanOTUdata(combined), file.path(combinedOTU.dir, paste0("combinedOTUdata_r", i, ".rds")))
+}
+close(pb)
+
 
 ## CREATE TAXONOMIC REFERENCE TABLES ===============
-combData_clean <- readRDS(file.path(data.dir, "combinedOTUdata.rds"))
-
 # Create reference table mapping species ID, zOTU and OTU
-refTable <- combData_clean[c("Species_ID", "zOTU_ID", "OTU_ID")]
-refTable <- unique(refTable)
+combinedOTU <- rbind(arfOTU[c("Species_ID", "zOTU_ID", "OTU_ID")], mcoOTU[c("Species_ID", "zOTU_ID", "OTU_ID")])
+refTable <- unique(combinedOTU)
 
 # Import fasta file to get BLAST-derived taxonomies
 seqData <- read.dna(file.path(data.dir, "ARFMCOAll_Species_ZOTU_OTUID042018.fasta"), format = "fasta")
@@ -108,47 +122,5 @@ taxonDF <- as.data.frame(taxonTab)
 # Create reference table mapping species ID, zOTU, OTU and taxonomic order
 refTableFinal <- merge(refTable,  taxonDF[,1:4], by.x = c("Species_ID", "zOTU_ID", "OTU_ID"), by.y = c("V1", "V2", "V3"))
 saveRDS(refTableFinal, file.path(data.dir, "taxonData.rds"))
+# NOTE: table will also contain zOTUs that have zero rarefied read abundance
 
-# NOTE: tables will only contain zOTUs that have above zero
-
-# SUBSET THE DATAFRAME ====================
-# Import taxonomic reference table
-source(file.path(analysis.dir, "metabarcodingTools.R"))
-taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
-
-# Create master zOTU matrix
-masterZOTU <- acast(zOTU_ID~Site_ID, data = combData_clean, fun.aggregate = sum, value.var = "rarefiedReadAbund")
-saveRDS(masterZOTU, file.path(data.dir, "masterZOTU.rds"))
-masterTable <- readRDS(file.path(data.dir, "masterZOTU.rds"))
-
-# Collapse ZOTU matrix into OTU and Species matrices
-OTUtab <- collapseOTU(x = masterTable, ref = taxonData, collapse.by = "OTU_ID", to.collapse = "zOTU_ID")#, subset.by = "V4")
-SPPtab <- collapseOTU(x = masterTable, ref = taxonData, collapse.by = "Species_ID", to.collapse = "zOTU_ID")#, subset.by = "V4")
-
-# Exclude the following orders
-toExclude <- subset(taxonData, V4 %in% c("Collembola", "Chilopoda", "Diplopoda", "Blattodea", "Isopoda", "Mantodea", "Phasmatodea"))
-
-masterTable_native <- masterTable[!rownames(masterTable) %in% toExclude$zOTU_ID, ]
-saveRDS(masterTable_native, file.path(data.dir, "zOTU_native.rds"))
-
-OTUtab_native <- OTUtab[!rownames(OTUtab) %in% toExclude$OTU_ID, ]
-saveRDS(OTUtab_native, file.path(data.dir, "OTU_native.rds"))
-SPPtab_native <- SPPtab[!rownames(SPPtab) %in% toExclude$Species_ID, ]
-saveRDS(SPPtab_native, file.path(data.dir, "SPP_native.rds"))
-
-orderList <- c("Araneae", "Hemiptera", "Lepidoptera", "Psocoptera", "Coleoptera", "Orthoptera")
-
-for(i in orderList){
-  targetTaxon <- subset(taxonData, V4 == i)
-  masterTable_subset <- masterTable_native[rownames(masterTable_native) %in% targetTaxon$zOTU_ID, ]
-  OTUtab_subset <- OTUtab_native[rownames(OTUtab_native) %in% targetTaxon$OTU_ID, ]
-  SPPtab_subset <- SPPtab_native[rownames(SPPtab_native) %in% targetTaxon$Species_ID, ]
-  saveRDS(masterTable_subset, file.path(data.dir, paste0("zOTU_", i, ".rds")))
-  saveRDS(OTUtab_subset, file.path(data.dir, paste0("OTU_", i, ".rds")))
-  saveRDS(SPPtab_subset, file.path(data.dir, paste0("SPP_", i, ".rds")))
-}
-
-# write.csv(masterTable, file.path(data.dir, "masterZOTU.csv"))
-# write.csv(OTUtab, file.path(data.dir, "OTUtab.csv"))
-# write.csv(SPPtab, file.path(data.dir, "SPPtab.csv"))
-# write.csv(taxonData, file.path(data.dir, "taxonData.csv"))

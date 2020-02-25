@@ -9,6 +9,7 @@ library(RColorBrewer)
 library(cowplot)
 library(viridis)
 library(wesanderson)
+library(ggnewscale)
 
 ## Directories ====================
 main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/elevationAssemblyHawaii/"
@@ -16,6 +17,7 @@ res.dir <- file.path(main.dir, "results")
 fig.dir <- file.path(main.dir, "figures")
 data.dir <- file.path(main.dir, "data")
 siteData <- read.csv(file.path(data.dir, "clim.final.csv"), stringsAsFactors = FALSE)
+siteData <- subset(siteData, island == "BigIsland")
 
 ## Resistance analysis ====================
 resist <- read_excel(file.path(res.dir, "jairo_resistance.xlsx"))
@@ -95,75 +97,281 @@ resist_bar <- ggplot(data = resist) +
 ggsave(resist_bar, filename = file.path(fig.dir, "resistance_bar.pdf"), height = )
 
 ## Site patterns =========
-ggplot(data = subset(siteData, island == "BigIsland")) +
-   geom_point(aes(y = rf_ann, x = elevation)) + facet_wrap(~ site)
- 
-ggplot(data = subset(siteData, island == "BigIsland")) +
-   geom_point(aes(y = t_ann, x = elevation)) + facet_wrap(~ site)
- 
-ggplot(data = subset(siteData, island == "BigIsland")) +
-   geom_point(aes(y = t_ann, x = rf_ann, color = site))
+rf_site_plot <- ggplot(data = subset(siteData, site %in%  c("Laupahoehoe", "Stainback"))) +
+  geom_point(aes(y = rf_ann, x = elevation, fill = site ), pch = 21, size = 3, colour = "grey20" ) +
+  scale_fill_manual(values = c("#003262", "#FDB515")) +
+  labs(y = "Total annual rainfall (mm)", x = "Elevation (m)") +
+  guides(fill = guide_legend(title = NULL, override.aes = list(size = 5))) +
+  theme(panel.background = element_blank(),
+        legend.position = c(1, 1),
+        #legend.background = element_rect(colour = "grey20"),
+        legend.justification = c(1,1),
+        legend.text = element_text(size = 10))
+
+temp_site_plot <- ggplot(data = subset(siteData, site %in%  c("Laupahoehoe", "Stainback"))) +
+  geom_point(aes(y = t_ann, x = elevation, fill = site ), pch = 21, size = 3, colour = "grey20" ) +
+  scale_fill_manual(values = c("#003262", "#FDB515")) +
+  labs(y = expression("Mean annual temperature ("~degree*C~")" ), x = "Elevation (m)") +
+  guides(fill = guide_legend(title = NULL, override.aes = list(size = 5))) +
+  theme(panel.background = element_blank(),
+        legend.position = c(1, 1),
+        #legend.background = element_rect(colour = "grey20"),
+        legend.justification = c(1,1),
+        legend.text = element_text(size = 10))
+
 
 ## Nsp ================
-site_nsp <- read.csv(file.path(res.dir, "site_nsp.csv"))
-site_nsp <- merge(site_nsp, siteData)
-head(site_nsp)
-ggplot(aes(y = nsp, x = elevation, colour = site), data = site_nsp) + geom_point() + geom_smooth(formula = y ~ poly(x,2), se = FALSE, method = "lm")
-?geom_smooth
+library(plyr)
+OTU_mat_nsp_site <- readRDS(file.path(res.dir, "OTU_nsp_site.rds"))
+OTU_mat_nsp_site_avg <- ddply(OTU_mat_nsp_site, .variables = .(site_id), summarize, mean_nsp = mean(nsp))
+OTU_mat_nsp_site_avg <- merge(x = OTU_mat_nsp_site_avg, y= siteData, by.x = "site_id", by.y = "site.id")
 
-## Median climate ================
-t_med_site <- read.csv(file.path(res.dir, "t_median_site.csv"))
-rf_med_site <- read.csv(file.path(res.dir, "rf_median_site.csv"))
-ggplot(data = t_med_site) + geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
-                      colour = "grey20", size = 3, pch = 21) +
-  geom_abline(aes(slope = 1, intercept = 0)) +
-  #geom_smooth(aes(y = Laupahoehoe, x = Stainback, group = V4, colour = V4),
-  #            method = "lm", se = FALSE) +
-  labs(y = "Median annual temperature\n(Laupahoehoe)",
-       x = "Median annual temperature\n(Stainback)") +
+nsp_plot <- ggplot() +
+  geom_point(aes(y = nsp, x = elevation, colour = site),
+             alpha = 0.05, pch = 16, size = 3, data = OTU_mat_nsp_site) +
+  geom_point(aes(y = mean_nsp, x = elevation, fill = site, colour = site), data = OTU_mat_nsp_site_avg,
+             pch = 21, size = 3, colour = "grey20") +
+  geom_smooth(aes(y = nsp, x = elevation, group = site, colour = site),
+              se = TRUE, method = "loess", alpha = 0.1, size = 1,
+              data = OTU_mat_nsp_site) +
+  guides(colour = FALSE, fill = guide_legend(title = NULL, override.aes = list(size = 5))) +
+    scale_fill_manual(values = c("#003262", "#FDB515")) +
+  scale_colour_manual(values = c("#003262", "#FDB515")) +
+  labs(x = "Elevation (m)",  y= "No. of unique\nOTUs") +
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank(),
+        legend.background = element_blank(),
+        legend.position = c(0,1),
+        legend.justification = c(0,1))
+
+# GEOGRAPHIC MAP =====================
+library(rgdal)
+library(raster)
+library(RStoolbox)
+hillshade <- raster(file.path(data.dir, "MHI_digital_elevation_model_hillshade_GIS_data/Hawaii_Hillshade/Hawaii_Hillshade_45deg.img"))
+siteSP <- SpatialPointsDataFrame(coords = siteData[c("longitude","latitude")], proj4string = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"), data = siteData[c("longitude","latitude", "site")])
+siteSP_reproj <- spTransform(siteSP, CRSobj = CRS(proj4string(hillshade)))
+siteSP_df <- cbind(siteSP_reproj@data["site"],siteSP_reproj@coords)
+
+hillshade_fort <- fortify(hillshade, maxpixels = 100000) #197,920,112
+
+map_plot <- ggplot() +
+  geom_tile(aes(y = y, x = x, fill = Hawaii_Hillshade_45deg.1_BinValues), data = hillshade_fort) +
+  coord_fixed() +
+  scale_fill_gradient(low = grey(0.01), high = grey(1), na.value = "white") +
+  ggnewscale::new_scale_fill() +
+  geom_point(aes(y= latitude, x= longitude, fill = site, colour = site), data = siteSP_df,
+             pch = 21, size = 3.5) +
+  scale_colour_manual(values = c("white", "grey20")) +
+  geom_label(aes(x = 285000, y= 2210000, label = "Laupahoehoe"), size = 3) +
+  geom_label(aes(x = 270000, y= 2155000, label = "Stainback"), size = 3) +
+  scale_fill_manual(values = c("#003262", "#FDB515")) +
+  theme(plot.background = element_blank(),
+        panel.background = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "none")
+ggsave(file.path(fig.dir, "map.pdf"), map_plot, width = 7, height = 7)
+
+## FIGURE 1  ================
+
+fig1 <- plot_grid(map_plot, nsp_plot, rf_site_plot, temp_site_plot, labels = "auto")
+ggsave(fig1, filename = file.path(fig.dir, "fig1.pdf"), height = 8, width = 8)
+
+## NMDS  ================
+library(viridis); library(directlabels)
+site_nmds <- read.csv(file.path(res.dir, "site_nmds.csv"))
+site_nmds_contour <- read.csv(file.path(res.dir, "site_nmds_contour.csv"))
+
+nmds_plot <- ggplot() + 
+  geom_point(aes(x = MDS1, y = MDS2, fill = site, shape = site), data = site_nmds, size = 3) +
+  scale_colour_manual(values = c("#003262", "#FDB515")) +
+  new_scale_color() +
+  stat_contour(data = site_nmds_contour, aes(x, y, z = z, group = ..level.., colour = ..level..)) +
+  #scale_colour_brewer(palette = "BrBG")
+  scale_colour_viridis() +
+  theme(legend.title = element_blank(),
+        panel.background = element_blank(), 
+        legend.position = c(1,1),
+        legend.justification = c(1,1))
+nmds_contour_plot <- direct.label(nmds_plot, "top.pieces")
+ggsave(nmds_contour_plot, filename = file.path(fig.dir, "nmds_plot.pdf"), width = 6, height = 6)
+
+## Niche position ================
+t_med_site_t10 <- read.csv(file.path(res.dir, "t_med_res_prep_avg_t10.csv"))
+t_med_site_t5 <- read.csv(file.path(res.dir, "t_med_res_prep_avg_t5.csv"))
+
+rf_med_site_t10 <- read.csv(file.path(res.dir, "rf_med_res_prep_avg_t10.csv"))
+rf_med_site_t5 <- read.csv(file.path(res.dir, "rf_med_res_prep_avg_t5.csv"))
+
+
+t_med_plot_t10 <- ggplot(aes(y = Laupahoehoe, x = Stainback),data = t_med_site_t10) + 
+  geom_point(aes(fill = V4),
+             colour = "grey20", size = 3, pch = 21) +
+  #geom_smooth(method = "lm") +
+  #geom_abline(aes(slope = 1, intercept = 0)) +
+  labs(y = "Niche position\n(Laupahoehoe)",
+       x = "Niche position\n(Stainback)") +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_colour_brewer(palette = "Spectral") +
+  guides(fill = guide_legend(title = "Taxonomic order")) + 
+  theme(plot.background = element_blank(),
+        panel.background = element_blank())
+
+rf_med_plot_t10 <- ggplot(data = rf_med_site_t10) + 
+  geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
+             colour = "grey20", size = 3, pch = 21) +
+  #geom_abline(aes(slope = 1, intercept = 0)) +
+  labs(y = "Niche position\n(Laupahoehoe)",
+       x = "Niche position\n(Stainback)") +
   scale_fill_brewer(palette = "Spectral") +
   scale_colour_brewer(palette = "Spectral") +
   theme(plot.background = element_blank(),
         panel.background = element_blank())
 
-ggplot(data = rf_med_site) + geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
-                                       colour = "grey20", size = 3, pch = 21) +
-  geom_abline(aes(slope = 1, intercept = 0)) +
-  #geom_smooth(aes(y = Laupahoehoe, x = Stainback, group = V4, colour = V4),
-  #            method = "lm", se = FALSE) +
-  labs(y = "Median annual precipitation\n(Laupahoehoe)",
-       x = "Median annual precipitation\n(Stainback)") +
+t_med_plot_t5 <- ggplot(aes(y = Laupahoehoe, x = Stainback),data = t_med_site_t5) + 
+  geom_point(aes(fill = V4),
+             colour = "grey20", size = 3, pch = 21) +
+  #geom_smooth(method = "lm") +
+  #geom_abline(aes(slope = 1, intercept = 0)) +
+  labs(y = "Niche position\n(Laupahoehoe)",
+       x = "Niche position\n(Stainback)") +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_colour_brewer(palette = "Spectral") +
+  guides(fill = guide_legend(title = "Taxonomic order")) + 
+  theme(plot.background = element_blank(),
+        panel.background = element_blank())
+
+rf_med_plot_t5 <- ggplot(data = rf_med_site_t5) + 
+  geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
+             colour = "grey20", size = 3, pch = 21) +
+  #geom_abline(aes(slope = 1, intercept = 0)) +
+  labs(y = "Niche position\n(Laupahoehoe)",
+       x = "Niche position\n(Stainback)") +
   scale_fill_brewer(palette = "Spectral") +
   scale_colour_brewer(palette = "Spectral") +
   theme(plot.background = element_blank(),
         panel.background = element_blank())
+
 
 ## Climate breadth ================
-t_breadth_site <- read.csv(file.path(res.dir, "t_breadth_site.csv"))
-rf_breadth_site <- read.csv(file.path(res.dir, "rf_breadth_site.csv"))
+t_breadth_site_t10 <- read.csv(file.path(res.dir, "t_bdt_res_prep_avg_t10.csv"))
+rf_breadth_site_t10 <- read.csv(file.path(res.dir, "rf_bdt_res_prep_avg_t10.csv"))
 
-ggplot(data = t_breadth_site) + geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
-                                       colour = "grey20", size = 3, pch = 21) +
-  geom_abline(aes(slope = 1, intercept = 0)) +
-  #geom_smooth(aes(y = Laupahoehoe, x = Stainback, group = V4, colour = V4),
-  #            method = "lm", se = FALSE) +
-  labs(y = "Range in annual temperature\n(Laupahoehoe)",
-       x = "Range in annual temperature\n(Stainback)") +
+t_breadth_site_t5 <- read.csv(file.path(res.dir, "t_bdt_res_prep_avg_t5.csv"))
+rf_breadth_site_t5 <- read.csv(file.path(res.dir, "rf_bdt_res_prep_avg_t5.csv"))
+
+t_breadth_plot_t10 <- ggplot(data = t_breadth_site_t10) + 
+  geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
+             colour = "grey20", size = 3, pch = 21) +
+  labs(y = "Niche breadth\n(Laupahoehoe)",
+       x = "Niche breadth\n(Stainback)") +
   scale_fill_brewer(palette = "Spectral") +
   scale_colour_brewer(palette = "Spectral") +
   theme(plot.background = element_blank(),
         panel.background = element_blank())
 
-ggplot(data = rf_breadth_site) + geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
-                                           colour = "grey20", size = 3, pch = 21) +
-  geom_abline(aes(slope = 1, intercept = 0)) +
-  #geom_smooth(aes(y = Laupahoehoe, x = Stainback, group = V4, colour = V4),
-  #            method = "lm", se = FALSE) +
-  labs(y = "Range in annual precipitation\n(Laupahoehoe)",
-       x = "Range in annual precipitation\n(Stainback)") +
+rf_breadth_plot_t10 <- ggplot(data = rf_breadth_site_t10) +
+  geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
+             colour = "grey20", size = 3, pch = 21) +
+  labs(y = "Niche breadth\n(Laupahoehoe)",
+       x = "Niche breadth\n(Stainback)") +
   scale_fill_brewer(palette = "Spectral") +
   scale_colour_brewer(palette = "Spectral") +
   theme(plot.background = element_blank(),
         panel.background = element_blank())
 
-## 
+t_breadth_plot_t5 <- ggplot(data = t_breadth_site_t5) + 
+  geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
+             colour = "grey20", size = 3, pch = 21) +
+  labs(y = "Niche breadth\n(Laupahoehoe)",
+       x = "Niche breadth\n(Stainback)") +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_colour_brewer(palette = "Spectral") +
+  theme(plot.background = element_blank(),
+        panel.background = element_blank())
+
+rf_breadth_plot_t5 <- ggplot(data = rf_breadth_site_t5) +
+  geom_point(aes(y = Laupahoehoe, x = Stainback, fill = V4),
+             colour = "grey20", size = 3, pch = 21) +
+  labs(y = "Niche breadth\n(Laupahoehoe)",
+       x = "Niche breadth\n(Stainback)") +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_colour_brewer(palette = "Spectral") +
+  theme(plot.background = element_blank(),
+        panel.background = element_blank())
+
+## Combined
+library(cowplot)
+
+niche_cons_plot_t10 <- plot_grid(plot_grid(t_med_plot_t10 + geom_abline(aes(intercept = 0, slope = 1)) + theme(legend.position = "none"),
+                                       rf_med_plot_t10 + geom_abline(aes(intercept = 0, slope = 1)) + theme(legend.position = "none"),
+                                       t_breadth_plot_t10+ geom_abline(aes(intercept = 0, slope = 1)) + theme(legend.position = "none"),
+                                       rf_breadth_plot_t10+ geom_abline(aes(intercept = 0, slope = 1)) + theme(legend.position = "none"), labels = "auto", scale = 0.9),
+                             get_legend(t_med_plot_t10 + theme(legend.position = "bottom")), nrow = 2, rel_heights = c(0.9,0.1))
+
+ggsave(niche_cons_plot_t10, filename=file.path(fig.dir, "niche_cons_t10.pdf"), height = 7, width = 7)
+
+niche_cons_plot_t5 <- plot_grid(plot_grid(t_med_plot_t5 + geom_abline(aes(intercept = 0, slope = 1))+ theme(legend.position = "none"),
+                                       rf_med_plot_t5 + geom_abline(aes(intercept = 0, slope = 1))+ theme(legend.position = "none"),
+                                       t_breadth_plot_t5 + geom_abline(aes(intercept = 0, slope = 1))+ theme(legend.position = "none"),
+                                       rf_breadth_plot_t5+ geom_abline(aes(intercept = 0, slope = 1)) + theme(legend.position = "none"), labels = "auto", scale = 0.9),
+                             get_legend(t_med_plot_t5 + theme(legend.position = "bottom")), nrow = 2, rel_heights = c(0.9,0.1))
+ggsave(niche_cons_plot_t5, filename=file.path(fig.dir, "niche_cons_t5.pdf"), height = 7, width = 7)
+
+
+## Niche breadth taxonomic orders
+t_breadth_plot_t5 <- ggplot(aes(y = t_breadth, x = V4), data = t_bdt_melt_t5) +
+  geom_boxplot(aes(fill = V4)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~Site) +
+  guides(fill = guide_legend(title = "Taxonomic order")) +
+  labs(y = "Niche breadth\n(Mean annual temperature)") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "bottom",
+        axis.text = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+rf_breadth_plot_t5 <- ggplot(aes(y = rf_breadth, x = V4), data = rf_bdt_melt_t5) +
+  geom_boxplot(aes(fill = V4)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~Site) +
+  guides(fill = guide_legend(title = "Taxonomic order")) +
+  labs(y = "Niche breadth\n(Total annual precipitation)") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "bottom",
+        axis.text = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+t_breadth_plot_t10 <- ggplot(aes(y = t_breadth, x = V4), data = t_bdt_melt_t10) +
+  geom_boxplot(aes(fill = V4)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~Site) +
+  guides(fill = guide_legend(title = "Taxonomic order")) +
+  labs(y = "Niche breadth\n(Mean annual temperature)") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "bottom",
+        axis.text = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+rf_breadth_plot_t10 <- ggplot(aes(y = rf_breadth, x = V4), data = rf_bdt_melt_t10) +
+  geom_boxplot(aes(fill = V4)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~Site) +
+  guides(fill = guide_legend(title = "Taxonomic order")) +
+  labs(y = "Niche breadth\n(Total annual precipitation)") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme(legend.position = "bottom",
+        axis.text = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_blank())
+
+niche_bdt_plot_t10 <- plot_grid(plot_grid(t_breadth_plot_t10 + theme(legend.position = "none"),
+                                          rf_breadth_plot_t10+ theme(legend.position = "none"), labels = "auto"),
+                                get_legend(t_breadth_plot_t10), rel_heights = c(0.9, 0.1), nrow = 2)
+
+niche_bdt_plot_t5 <- plot_grid(plot_grid(t_breadth_plot_t5 + theme(legend.position = "none"),
+                                         rf_breadth_plot_t5+ theme(legend.position = "none"), labels = "auto"),
+                               get_legend(t_breadth_plot_t5), rel_heights = c(0.9, 0.1), nrow = 2)
+ggsave(niche_bdt_plot_t10, filename = file.path(fig.dir, "niche_bdt_plot_t10.pdf"), height = 4, width = 6)
+ggsave(niche_bdt_plot_t5, filename = file.path(fig.dir, "niche_bdt_plot_t5.pdf"), height = 4, width = 6)
