@@ -322,6 +322,12 @@ ggsave(niche_cons_plot_t5, filename=file.path(fig.dir, "niche_cons_t5.pdf"), hei
 
 
 ## Niche breadth taxonomic orders
+rf_bdt_melt_t10 <- read.csv(file.path(res.dir, "rf_bdt_melt_t10.csv"))
+rf_bdt_melt_t5 <- read.csv(file.path(res.dir, "rf_bdt_melt_t5.csv"))
+t_bdt_melt_t10 <- read.csv(file.path(res.dir, "t_bdt_melt_t10.csv"))
+t_bdt_melt_t5 <- read.csv(file.path(res.dir, "t_bdt_melt_t5.csv"))
+
+
 t_breadth_plot_t5 <- ggplot(aes(y = t_breadth, x = V4), data = t_bdt_melt_t5) +
   geom_boxplot(aes(fill = V4)) +
   geom_point(alpha = 0.5) +
