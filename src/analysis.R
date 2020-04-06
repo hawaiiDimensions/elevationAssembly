@@ -36,7 +36,7 @@ taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
 OTUtaxonData <- taxonData[c("OTU_ID", "V4")]
 OTUtaxonData <- OTUtaxonData[!duplicated(OTUtaxonData),]
 
-## ALPHA DIVERSITY PATTERNS 
+## ALPHA DIVERSITY PATTERNS  =========
 OTU_mat_df <- melt(OTU_mat_list, varnames = c("OTU_ID", "site_id"),
                    value.name = "nReads")
 
@@ -46,6 +46,15 @@ OTU_mat_nsp <- ddply(subset(OTU_mat_df, nReads > 0), .variables = .(L1, site_id)
 
 OTU_mat_nsp_site <- merge(x = OTU_mat_nsp, y = siteData, by.x = "site_id", by.y= "site.id", all.x = T)
 saveRDS(OTU_mat_nsp_site, file.path(res.dir, "OTU_nsp_site.rds"))
+
+## Calculate the average distance between sampling localities between sites
+library(geosphere)
+test <- as.matrix(siteData[c("longitude", "latitude")])
+rownames(test) <- siteData$site.id
+
+pw_geogdist <- distm(test, test, fun = distGeo)
+mean(pw_geogdist[which(siteData$site == "Laupahoehoe"), which(siteData$site == "Stainback")])
+
 
 ## NMDS =========
 # Calculate the average rarefied read abundance for all OTUs
@@ -73,6 +82,21 @@ site_nmds_contour2 <- extract.xyz(site_nmds_contour)
 
 write.csv(site_nmds_df2, file.path(res.dir, "site_nmds.csv"), row.names = F)
 write.csv(site_nmds_contour2, file.path(res.dir, "site_nmds_contour.csv"), row.names = F)
+
+# Beta-diversity over elevation
+x <- as.matrix(vegdist(OTU_mat_avg, method = "bray", diag = T, upper = T))
+xy <- t(combn(colnames(x), 2))
+distDF <- data.frame(xy, dist= x[xy])
+head(siteData)
+distDF2 <- merge(x = distDF, y = siteData[, c("site.id", "elevation", "site")], by.x = "X1", by.y = "site.id")
+distDF3 <- merge(x = distDF2, y = siteData[, c("site.id", "elevation", "site")], by.x = "X2", by.y = "site.id", suffixes = c("_X1", "_X2"))
+
+elev_bins <- c("500", "1000", "1200", "1400", "1600", "2000")
+elev_bin_labels <- c("< 1,000", "1,000 - 1,200", "1,200 - 1,400", "1,400 - 1,600", "> 1,600")
+
+distDF3$elevation_X1_class <- cut(distDF3$elevation_X1, breaks = elev_bins, labels = elev_bin_labels)
+distDF3$elevation_X2_class <- cut(distDF3$elevation_X2, breaks = elev_bins, labels = elev_bin_labels)
+write.csv(distDF3, file = file.path(res.dir, "elevation_dist.csv"), row.names = F)
 
 ## ABUNDANCE PATTERNS =========
 t_res_list_t10 <- list()

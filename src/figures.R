@@ -10,6 +10,7 @@ library(cowplot)
 library(viridis)
 library(wesanderson)
 library(ggnewscale)
+library(plyr)
 
 ## Directories ====================
 main.dir <- "~/Dropbox/Projects/2017/hawaiiCommunityAssembly/elevationAssemblyHawaii/"
@@ -20,7 +21,7 @@ siteData <- read.csv(file.path(data.dir, "clim.final.csv"), stringsAsFactors = F
 siteData <- subset(siteData, island == "BigIsland")
 
 ## Resistance analysis ====================
-resist <- read_excel(file.path(res.dir, "jairo_resistance.xlsx"))
+resist <- read_excel(file.path(res.dir, "jairo_resistance_10032020.xlsx"))
 resist <- as.data.frame(resist)
 
 resist$Model <- factor(resist$Model,
@@ -34,17 +35,32 @@ resist$Model <- factor(resist$Model,
                                   "Precip",
                                   "Temp + Precip",
                                   "Null"))
-groups <- c("All",
+
+groups <- c(#"All",
             "Araneae",
             "Coleoptera",
             "Hemiptera",
             "Lepidoptera",
             "Orthoptera",
             "Psocoptera")
-resist$Group <- factor(resist$Group, 
+resist$Order <- factor(resist$Order, 
                        levels = rev(groups))
 
-resist$weight2 <- cut(resist$weight, breaks = seq(0, 1, 1/8))
+
+
+# Calculate average akaike weight across rarefied datasets
+resist$weight <- as.numeric(resist$weight)
+
+# Jairo's error?
+resist_sum <- ddply(.data = subset(resist, !(Rarefied_ID == 92 & Site == "Laupahoehoe" & Order == "Coleoptera")), .variables = .(Site, Order, Rarefied_ID), .fun = summarize, avgAkaikeWeight = sum(weight) )
+
+resist_summary <- ddply(.data = subset(resist, !(Rarefied_ID == 92 & Site == "Laupahoehoe" & Order == "Coleoptera")),
+                        .variables = .(Site, Order, Model), .fun = summarize, avgAkaikeWeight = mean(weight) )
+
+resist_sum2 <- ddply(resist_summary, .variables = .(Site, Order), .fun = summarize, sumAW = sum(avgAkaikeWeight))
+
+# Plotting as a heatmap
+resist_summary$weight2 <- cut(resist_summary$avgAkaikeWeight, breaks = seq(0, 1, 1/8))
 
 resist_plot <- ggplot(data = resist) +
   geom_tile(aes(x = Model, y = Group, fill = weight2)) + 
@@ -78,9 +94,9 @@ resist_plot_comb <- plot_grid(resist_plot + theme(legend.position = "none"),
                               rel_heights = c(0.9, 0.1))
 ggsave(resist_plot_comb, filename = file.path(fig.dir, "resistance.pdf"), width = 8, height = 6)
 
-# Plot as stacked bars
-resist_bar <- ggplot(data = resist) + 
-  geom_bar(aes(fill = factor(Model), x= Group, weight = weight)) + 
+# Plotting as stacked bars
+resist_bar <- ggplot(data = resist_summary) + 
+  geom_bar(aes(fill = factor(Model), x= Order, weight = avgAkaikeWeight)) + 
   facet_wrap(~Site) + 
   guides(fill = guide_legend(title = "Model")) +
   labs(x = NULL, y = "Akaike weight") +
@@ -94,7 +110,7 @@ resist_bar <- ggplot(data = resist) +
         axis.text.x = element_text(angle = 45, hjust = 1),
         strip.text = element_text(size = 12, colour = "grey20"))
 
-ggsave(resist_bar, filename = file.path(fig.dir, "resistance_bar.pdf"), height = )
+ggsave(resist_bar, filename = file.path(fig.dir, "resistance_bar.pdf"), height = 7, width = 10)
 
 ## Site patterns =========
 rf_site_plot <- ggplot(data = subset(siteData, site %in%  c("Laupahoehoe", "Stainback"))) +
@@ -197,6 +213,20 @@ nmds_plot <- ggplot() +
         legend.justification = c(1,1))
 nmds_contour_plot <- direct.label(nmds_plot, "top.pieces")
 ggsave(nmds_contour_plot, filename = file.path(fig.dir, "nmds_plot.pdf"), width = 6, height = 6)
+
+elevation_dist <- read.csv(file.path(res.dir, "elevation_dist.csv"))
+
+elevation_dist_plot <- ggplot(data = subset(elevation_dist, elevation_X1_class == elevation_X2_class & site_X1 != site_X2)) +
+  geom_violin(aes(y = dist, x = elevation_X1_class, fill = elevation_X1_class)) +
+  geom_point(aes(y = dist, x = elevation_X1_class)) +
+  theme(legend.position = "none", 
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_blank()) +
+  labs(y = "Pairwise Bray-Curtis distance", x = "Elevation bin (m)") +
+  scale_fill_manual(values = wes_palette("IsleofDogs2", n = 4))
+
+distance_plot <- plot_grid(nmds_contour_plot, elevation_dist_plot, labels = "auto", label_size = 18)
+ggsave(distance_plot, filename = file.path(fig.dir, "distance_plot.pdf"), width = 10, height = 5)
 
 ## Niche position ================
 t_med_site_t10 <- read.csv(file.path(res.dir, "t_med_res_prep_avg_t10.csv"))
