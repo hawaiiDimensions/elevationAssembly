@@ -51,48 +51,12 @@ resist$Order <- factor(resist$Order,
 # Calculate average akaike weight across rarefied datasets
 resist$weight <- as.numeric(resist$weight)
 
-# Jairo's error?
-resist_sum <- ddply(.data = subset(resist, !(Rarefied_ID == 92 & Site == "Laupahoehoe" & Order == "Coleoptera")), .variables = .(Site, Order, Rarefied_ID), .fun = summarize, avgAkaikeWeight = sum(weight) )
+resist_sum <- ddply(.data = resist, .variables = .(Site, Order, Rarefied_ID), .fun = summarize, avgAkaikeWeight = sum(weight) )
 
-resist_summary <- ddply(.data = subset(resist, !(Rarefied_ID == 92 & Site == "Laupahoehoe" & Order == "Coleoptera")),
+resist_summary <- ddply(.data = resist,
                         .variables = .(Site, Order, Model), .fun = summarize, avgAkaikeWeight = mean(weight) )
 
 resist_sum2 <- ddply(resist_summary, .variables = .(Site, Order), .fun = summarize, sumAW = sum(avgAkaikeWeight))
-
-# Plotting as a heatmap
-resist_summary$weight2 <- cut(resist_summary$avgAkaikeWeight, breaks = seq(0, 1, 1/8))
-
-resist_plot <- ggplot(data = resist) +
-  geom_tile(aes(x = Model, y = Group, fill = weight2)) + 
-  facet_wrap(.~Site) + 
-  scale_fill_manual(values = brewer.pal(name = "YlGnBu", n = 9)[8:1]) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        strip.background = element_blank(),
-        strip.text = element_text(size = 12, colour = "grey20"),
-        panel.background = element_blank(), 
-        axis.title.x = element_blank())
-
-ylcolors <- rev(brewer.pal(name = "YlGnBu", n = 8))
-
-resist_legend <- ggplot(data = resist) +
-  geom_tile(aes(x = Model, y = Group, fill = weight)) +
-  facet_wrap(.~Site) + 
-  guides(fill = 
-           guide_colorbar(nbin = 8, title = "Akaike Weight", label = T, raster = F,
-                          draw.ulim = T, draw.llim = T, ticks = F,
-                          barwidth = unit(2,"in"),
-                          barheight = unit(0.1, "in"))) +
-  scale_fill_gradientn(colours = ylcolors,
-                       breaks = c(0, 0.5, 1),
-                       limits = c(0,1),
-                       labels = c(0, 0.5, 1)) +
-  theme(legend.position = "bottom")
-
-resist_plot_comb <- plot_grid(resist_plot + theme(legend.position = "none"),
-                              get_legend(resist_legend), 
-                              nrow = 2,
-                              rel_heights = c(0.9, 0.1))
-ggsave(resist_plot_comb, filename = file.path(fig.dir, "resistance.pdf"), width = 8, height = 6)
 
 # Plotting as stacked bars
 resist_bar <- ggplot(data = resist_summary) + 
@@ -164,12 +128,14 @@ nsp_plot <- ggplot() +
 library(rgdal)
 library(raster)
 library(RStoolbox)
-hillshade <- raster(file.path(data.dir, "MHI_digital_elevation_model_hillshade_GIS_data/Hawaii_Hillshade/Hawaii_Hillshade_45deg.img"))
+
+hillshade.dir <- c("~/Dropbox/maps/hawaii/MHI_digital_elevation_model_hillshade_GIS_data/")
+hillshade <- raster(file.path(hillshade.dir, "Hawaii_Hillshade/Hawaii_Hillshade_45deg.img"))
 siteSP <- SpatialPointsDataFrame(coords = siteData[c("longitude","latitude")], proj4string = CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"), data = siteData[c("longitude","latitude", "site")])
 siteSP_reproj <- spTransform(siteSP, CRSobj = CRS(proj4string(hillshade)))
 siteSP_df <- cbind(siteSP_reproj@data["site"],siteSP_reproj@coords)
 
-hillshade_fort <- fortify(hillshade, maxpixels = 100000) #197,920,112
+hillshade_fort <- fortify(hillshade, maxpixels = 100000) #197,920,112 actual pixels so this is a coarse graining
 
 map_plot <- ggplot() +
   geom_tile(aes(y = y, x = x, fill = Hawaii_Hillshade_45deg.1_BinValues), data = hillshade_fort) +
@@ -202,6 +168,7 @@ site_nmds_contour <- read.csv(file.path(res.dir, "site_nmds_contour.csv"))
 
 nmds_plot <- ggplot() + 
   geom_point(aes(x = MDS1, y = MDS2, fill = site, shape = site), data = site_nmds, size = 3) +
+  ggrepel::geom_text_repel(aes(x = MDS1, y = MDS2, label = elevation), data = site_nmds) +
   scale_colour_manual(values = c("#003262", "#FDB515")) +
   new_scale_color() +
   stat_contour(data = site_nmds_contour, aes(x, y, z = z, group = ..level.., colour = ..level..)) +
@@ -215,10 +182,15 @@ nmds_contour_plot <- direct.label(nmds_plot, "top.pieces")
 ggsave(nmds_contour_plot, filename = file.path(fig.dir, "nmds_plot.pdf"), width = 6, height = 6)
 
 elevation_dist <- read.csv(file.path(res.dir, "elevation_dist.csv"))
+elevation_dist$elevation_X1_class <- factor(as.vector(elevation_dist$elevation_X1_class),
+                                            levels = c("< 800", "800 - 1,100", "1,100 - 1,400", "1,400 - 1,700", "> 1,700"))
+
+elevation_dist$elevation_X2_class <- factor(as.vector(elevation_dist$elevation_X2_class),
+       levels = c("< 800", "800 - 1,100", "1,100 - 1,400", "1,400 - 1,700", "> 1,700"))
 
 elevation_dist_plot <- ggplot(data = subset(elevation_dist, elevation_X1_class == elevation_X2_class & site_X1 != site_X2)) +
   geom_violin(aes(y = dist, x = elevation_X1_class, fill = elevation_X1_class)) +
-  geom_point(aes(y = dist, x = elevation_X1_class)) +
+  geom_point(aes(y = dist, x = elevation_X1_class), pch = 21, size = 2) +
   theme(legend.position = "none", 
         axis.text.x = element_text(angle = 45, hjust = 1),
         panel.background = element_blank()) +
