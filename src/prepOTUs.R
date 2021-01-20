@@ -25,11 +25,11 @@ zOTU_native.dir <- file.path(data.dir, "zOTU_native")
 orderList <- c("Araneae", "Hemiptera", "Lepidoptera", "Psocoptera", "Coleoptera", "Orthoptera")
 OTU_native_order.dir <- file.path(file.path(data.dir, "OTU_native_order"))
 
-
-otufiles <- list.files(data.dir)[grep(list.files(data.dir), pattern = "combinedOTUdata_r")]
+combOTU.dir <- file.path(data.dir, "combinedOTU")
+otufiles <- list.files(combOTU.dir)[grep(list.files(combOTU.dir), pattern = "combinedOTUdata_r")]
 for(i in 1:100){
   # Create master zOTU table
-  combData <- readRDS(file.path(data.dir, otufiles[i]))
+  combData <- readRDS(file.path(combOTU.dir, otufiles[i]))
   masterTable <- acast(zOTU_ID ~Site_ID, data = combData, fun.aggregate = sum, value.var = "rarefiedReadAbund")
   saveRDS(masterTable, file.path(masterOTU.dir, paste0("master_zOTU_r", i, ".rds")))
   
@@ -55,10 +55,6 @@ for(i in 1:100){
   }
 }
 
-# write.csv(masterTable, file.path(data.dir, "masterZOTU.csv"))
-# write.csv(OTUtab, file.path(data.dir, "OTUtab.csv"))
-# write.csv(SPPtab, file.path(data.dir, "SPPtab.csv"))
-# write.csv(taxonData, file.path(data.dir, "taxonData.csv"))
 
 # select random rarefaction
 set.seed(12345)
@@ -70,14 +66,11 @@ resistance.dir <- file.path(data.dir, "resistance_analysis")
 jairofname <- list.files(resistance.dir)
 jairotab <- lapply(file.path(resistance.dir, jairofname), FUN = readRDS)
 
-laupahoehoe_siteIDs <-subset(siteData, site == "Laupahoehoe")$site.id
-stainback_siteIDs <-subset(siteData, site == "Stainback")$site.id
+siteData <- read.csv(file.path(data.dir, "clim.final.csv"))
+laupahoehoe_siteIDs <-subset(siteData, site == "Laupahoehoe" & elevation >= 800)$site.id
+stainback_siteIDs <-subset(siteData, site == "Stainback"& elevation >= 800)$site.id
 
-#laupahoehoe_tab <- list()
-#stainback_tab <- list()
 for(i in 1:length(jairotab)){
-  #laupahoehoe_tab[[i]] <-
   saveRDS(jairotab[[i]][,laupahoehoe_siteIDs], file = file.path(resistance.dir, paste0("laupahoehoe_", jairofname[i])))
-  #stainback_tab[[i]] <-
   saveRDS(jairotab[[i]][,stainback_siteIDs], file = file.path(resistance.dir, paste0("stainback_", jairofname[i])))
 }

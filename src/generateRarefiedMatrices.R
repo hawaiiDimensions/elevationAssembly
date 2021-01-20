@@ -63,11 +63,11 @@ mcoOTU_summary <- ddply(.data =  mcoOTU, .var = .(SizeCategory,Site_ID),.fun = s
 arfOTU_summary2 <- merge(arfOTU_summary, specimenCounts)
 mcoOTU_summary2 <- merge(mcoOTU_summary, specimenCounts)
 
-sum(mcoOTU_summary2$arfTotalReads < (mcoOTU_summary2$Count * 7)) # all samples have enough reads for rarefaction
-sum(mcoOTU_summary2$arfTotalReads < (mcoOTU_summary2$Count * 8)) # all samples have enough reads for rarefaction
+sum(mcoOTU_summary2$mcoTotalReads < (mcoOTU_summary2$Count * 7)) # all samples have enough reads for rarefaction
+sum(mcoOTU_summary2$mcoTotalReads < (mcoOTU_summary2$Count * 8)) # all samples have enough reads for rarefaction
 
-sum(arfOTU_summary2$arfTotalReads < (mcoOTU_summary2$Count * 7)) # all samples have enough reads for rarefaction
-sum(arfOTU_summary2$arfTotalReads < (mcoOTU_summary2$Count * 8)) # 4 samples have too few reads for rarefaction at the same level as other samples
+sum(arfOTU_summary2$arfTotalReads < (arfOTU_summary2$Count * 7)) # all samples have enough reads for rarefaction
+sum(arfOTU_summary2$arfTotalReads < (arfOTU_summary2$Count * 8)) # 4 samples have too few reads for rarefaction at the same level as other samples
 
 for(i in 1:nreps){
   pb = txtProgressBar(min = 0, max = nreps, style = 3, initial = 0) 
