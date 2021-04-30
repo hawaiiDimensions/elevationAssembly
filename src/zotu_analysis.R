@@ -186,15 +186,9 @@ zOTU_beta_avg_unique3 <- merge(x = zOTU_beta_avg_unique2, y = siteData[, c("site
 zOTU_beta_avg_unique3$elevation_mean <- apply(zOTU_beta_avg_unique3[,c("elevation_X1", "elevation_X2")], 1, mean )
 write.csv(zOTU_beta_avg_unique3, file = file.path(res.dir, "zOTU_beta_results.csv"))
 
-
-
-
 ## GRAPHICS
 ## Haplotype diversity ================
 site_haplodiv <- readRDS(file.path(res.dir, "zOTU_mat_haplodiv.rds"))
-
-
-
 
 ## Genetic distance ================
 zOTU_beta_distance <- read.csv(file.path(res.dir, "zOTU_beta_results.csv"))

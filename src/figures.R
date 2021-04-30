@@ -10,6 +10,7 @@ library(cowplot)
 library(viridis)
 library(wesanderson)
 library(ggnewscale)
+library(reshape2)
 library(plyr)
 library(rgdal)
 library(raster)
@@ -57,12 +58,12 @@ temp_site_plot <- ggplot(data = subset(siteData,
         legend.justification = c(1,1),
         legend.text = element_text(size = 10))
 
-transect_climate_plot <- plot_grid(rf_site_plot, temp_site_plot, labels = "auto")
+transect_climate_plot <- plot_grid(rf_site_plot, temp_site_plot, labels = c("(a)", "(b)"))
 ggsave(transect_climate_plot, filename = file.path(fig.dir, "transect_climate.pdf"), height = 4, width = 8)
 
 ## ALPHA DIVERSITY ================
 OTU_mat_nsp_site <- readRDS(file.path(res.dir, "OTU_nsp_site.rds"))
-OTU_mat_nsp_site$propE  <- OTU_mat_nsp_site$S_end / OTU_mat_nsp_site$S * 100
+OTU_mat_nsp_site$propE  <- OTU_mat_nsp_site$S_end / OTU_mat_nsp_site$S
 
 OTU_mat_nsp_site_avg <- ddply(OTU_mat_nsp_site, .variables = .(site.id), summarise,
                               avgH = mean(H),
@@ -73,6 +74,8 @@ OTU_mat_nsp_site_avg <- ddply(OTU_mat_nsp_site, .variables = .(site.id), summari
                               site = site[1],
                               minS = min(S),
                               maxS = max(S),
+                              minPE = min(propE),
+                              maxPE = max(propE),
                               minH = min(H),
                               maxH = max(H),
                               avgS_araneae = mean(S_araneae),
@@ -102,7 +105,27 @@ nsp_plot <- ggplot(data = subset(OTU_mat_nsp_site_avg, elevation > 800)) +
         legend.justification = c(1,1))
 ggsave(nsp_plot, filename = file.path(fig.dir, "nsp.pdf"), height = 5, width = 5)
 
-# Plot OTU richness with elevation (Fig S2) ==========
+# Plot endemism with elevation (Fig XX) ==========
+end_plot <- ggplot(data = subset(OTU_mat_nsp_site_avg, elevation > 800)) +
+  geom_errorbar(aes(ymin = minPE, ymax = maxPE, x = elevation, colour = site), width = 0) +
+  geom_point(aes(y = avgPE, x = elevation, fill = site), data = subset(OTU_mat_nsp_site_avg, elevation > 800), colour = "black",
+             pch = 21, size = 3) +
+  geom_smooth(aes(y = avgPE, x = elevation, group = site, colour = site),
+              se = TRUE, method = "loess", alpha = 0.2, size = 1) +
+  guides(colour = FALSE, fill = guide_legend(title = NULL, override.aes = list(size = 5))) +
+  scale_fill_manual(values = c("#003262", "#FDB515")) +
+  scale_colour_manual(values = c("#003262", "#FDB515")) +
+  scale_x_continuous(breaks = c(800,1000,1200,1400, 1600)) +
+  labs(x = "Elevation (m)",  y= "Proportion endemic") +
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank(),
+        legend.background = element_blank(),
+        legend.position = c(1,1),
+        legend.key = element_blank(),
+        legend.justification = c(1,1))
+ggsave(end_plot, filename = file.path(fig.dir, "PE.pdf"), height = 5, width = 5)
+
+# Plot Shannon index with elevation (Fig S2) ==========
 H_plot <- ggplot(data = subset(OTU_mat_nsp_site_avg, elevation > 800)) +
   geom_errorbar(aes(ymin = minH, ymax = maxH, x = elevation, colour = site), width = 0) +
   geom_point(aes(y = avgH, x = elevation, fill = site), data = subset(OTU_mat_nsp_site_avg, elevation > 800), colour = "black",
@@ -156,7 +179,7 @@ ggsave(nsp_order_plot, filename = file.path(fig.dir, "nsp_order_plot.pdf"), heig
 ggsave(nsp_order_plot, filename = file.path(fig.dir, "nsp_order_plot.png"), height = 12.5, width = 20, units = cm)
 
 
-OTU_order<- ddply(.data = OTU_mat_nsp_site, .variables = .(site.id), summarize, 
+OTU_order<- ddply(.data = OTU_mat_nsp_site, .variables = .(site.id), summarise, 
                   avgS_araneae = mean(S_araneae / S),
                   avgS_coleoptera = mean(S_coleoptera / S),
                   avgS_hemiptera = mean(S_hemiptera / S),
@@ -222,7 +245,7 @@ OTU_order_pi_plot <- ggplot(data = OTU_order_pi) +
 OTU_order_plot <- 
   plot_grid(
   plot_grid(OTU_order_S_plot + theme(legend.position = "none"),
-                            OTU_order_pi_plot + theme(legend.position = "none"), nrow = 2, labels = "auto"),
+                            OTU_order_pi_plot + theme(legend.position = "none"), nrow = 2, labels = c("(a)", "(b)")),
   get_legend(OTU_order_S_plot), nrow = 1, rel_widths = c(1, 0.2))
 ggsave(OTU_order_plot, filename = file.path(fig.dir, "OTU_order_plot.pdf"), width = 12, height = 6)
 
@@ -269,26 +292,33 @@ plot_label <- as.character(round(all_cor$estimate,2))
 elevation_dist_plot <-
   ggplot(data = elevation_dist_compare, aes(y = bc_all, x = avgElevation)) + 
   geom_point(fill = "white", colour = "black", pch = 21, size = 3) + 
-  annotate("text", x = -Inf, y = -Inf,
-           label = as.expression(bquote(rho==.(plot_label)~"*")), hjust = -0.3, vjust= -0.5, parse = T, size = 4) +
+  annotate(geom = "text", 
+           label = paste("rho==",
+                         as.character(round(all_cor$estimate, 2)),
+                         ifelse(all_cor$p.value < 0.05, "~'*'", "")),
+           x = Inf, y = -Inf, hjust = 1, vjust = 0, size = 6,
+           colour = "black", parse = T) +
   labs(y = "Bray-Curtis dissimilarity\n(All orders)", x = "Mean elevation (m)") +
   xlab("Mean elevation (m)") + 
-  geom_smooth(method = "lm", colour = "grey20", size = 0.5) +
+  #geom_smooth(method = "lm", colour = "grey20", size = 0.5) +
   theme(panel.background = element_blank())
 
-# Plot bray-curtis (all orders + presence-absence) with elevation (Fig. S5b)
+# Plot bray-curtis (all orders + presence-absence) with elevation (Fig. S5b) =======
 all_cor_pa <- cor.test(elevation_dist_compare$bcpa_all,
                        elevation_dist_compare$avgElevation,
                        method = "spearman", exact = FALSE)
-plot_pa_label <- as.expression(bquote(rho==.(as.character(round(all_cor_pa$estimate,2)))~"*"))
 elevation_distpa_plot <-
   ggplot(data = elevation_dist_compare, aes(y = bcpa_all, x = avgElevation)) + 
   geom_point(fill = "white", colour = "black", pch = 21, size = 3) + 
-  annotate("text", x = -Inf, y = -Inf,
-             label = plot_pa_label, hjust = -0.3, vjust= -0.5, parse = T, size = 4) +
+  annotate(geom = "text", 
+           label = paste("rho==",
+                         as.character(round(all_cor_pa$estimate, 2)),
+                         ifelse(all_cor_pa$p.value < 0.05, "~'*'", "")),
+           x = Inf, y = -Inf, hjust = 1, vjust = 0, size = 6,
+           colour = "black", parse = T) +
   labs(y = "Bray-Curtis dissimilarity\n(All orders)", x = "Mean elevation (m)") +
   xlab("Mean elevation (m)") + 
-  geom_smooth(method = "lm", colour = "grey20", size = 0.5) +
+  #geom_smooth(method = "lm", colour = "grey20", size = 0.5) +
   theme(panel.background = element_blank())
 
 # Define function to calculate correlations
@@ -299,13 +329,7 @@ calculateCorr <- function(x){
   data.frame(corr, p)
 }
 
-
-if(p < 0.05){
-  label <- as.expression(bquote(rho==.(as.character(round(cor, 2)))~"*"))  
-} else {
-  label <- as.expression(bquote(rho==.(as.character(round(cor, 2)))))
-}
-# Plot bray-curtis (individual orders) with elevation (Fig 3c) ==========
+# Plot bray-curtis (individual orders) with elevation (Fig S6a) ==========
 elevation_dist_compare_melt <- 
   melt(elevation_dist_compare,
      id.var = c("X2", "X1", "avgElevation"),
@@ -320,7 +344,7 @@ elevation_dist_taxon_plot <-
   ggplot(data = elevation_dist_compare_melt,
          aes(y = bc, x = avgElevation, colour = variable)) + 
     geom_point(fill = "white", pch = 21, size = 3) +
-    geom_smooth(method = "lm") +
+    #geom_smooth(method = "lm") +
     geom_text(aes(label = paste("rho==",
                                 as.character(round(corr, 2)),
                                 ifelse(p < 0.05, "~'*'", "")),
@@ -336,7 +360,7 @@ elevation_dist_taxon_plot <-
         strip.text = element_text(size = 8)) +
   scale_color_manual(values = berkcol3[c(1,5,7,9,11,14)])
 
-# Plot bray-curtis (individual orders + presence-absence) with elevation (Fig S5c) ==========
+# Plot bray-curtis (individual orders + presence-absence) with elevation (Fig S6b) ==========
 elevation_distpa_compare_melt <- 
   melt(elevation_dist_compare,
        id.var = c("X2", "X1", "avgElevation"),
@@ -352,7 +376,7 @@ elevation_distpa_taxon_plot <-
   ggplot(data = elevation_distpa_compare_melt,
          aes(y = bcpa, x = avgElevation, colour = variable)) + 
   geom_point(fill = "white", pch = 21, size = 3) +
-  geom_smooth(method = "lm") +
+  #geom_smooth(method = "lm") +
   geom_text(aes(label = paste("rho==",
                               as.character(round(corr, 2)),
                               ifelse(p < 0.05, "~'*'", "")),
@@ -360,7 +384,7 @@ elevation_distpa_taxon_plot <-
             data = elevation_distpa_order_corr,
             hjust = -0.1, vjust= -0.5, size = 4,
             colour = "black", parse = T) +
-  labs(y="Bray-Curtis dissimilarity", x="Mean elevation (m)") + 
+  labs(y="Bray-Curtis dissimilarity", x= "Mean elevation (m)") + 
   facet_wrap(~variable, scales = "free") +
   theme(panel.background = element_blank(),
         strip.background = element_blank(),
@@ -368,22 +392,72 @@ elevation_distpa_taxon_plot <-
         strip.text = element_text(size = 8)) +
   scale_color_manual(values = berkcol3[c(1,5,7,9,11,14)])
 
+# Plot weighted average zOTU dissimilarity (Fig 3c) =======
+zOTU_beta_avg <- readRDS(file.path(res.dir,"zOTU_beta_avg.rds"))
+mean_bray_corr <- cor.test(x = zOTU_beta_avg$mean_bray, y =  zOTU_beta_avg$avgElevation, method = "spearman", exact = FALSE) # 0.548
+zOTU_beta_plot <- ggplot(data = zOTU_beta_avg) +
+  geom_point(aes(y = mean_bray, x = avgElevation, size = nSharedOTUs), pch = 21, fill = "white") +
+  labs(y = "Average zOTU dissimilarity", x = "Mean elevation (m)") +
+  guides(size = guide_legend(title = "Number of\nshared OTUs")) +
+  #geom_smooth(aes(y = mean_bray, x = avgElevation), method = "lm", colour = "grey20", data = zOTU_beta_avg) +
+  annotate(geom = "text", 
+           label = paste("rho==",
+                              as.character(round(mean_bray_corr$estimate, 2)),
+                              ifelse(mean_bray_corr$p.value < 0.05, "~'*'", "")),
+                x = Inf, y = -Inf, hjust = 1, vjust = 0, size = 6,
+            colour = "black", parse = T) +
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = c(0.15, 0.75),
+        legend.background = element_rect(color= "grey20"))
+
+# Plot unweighted average zOTU dissimilarity (Fig S5c) =======  
+mean_bray_corr_pa <- cor.test(x = zOTU_beta_avg$mean_bray_pa, y =  zOTU_beta_avg$avgElevation, method = "spearman", exact = FALSE) # 0.759
+zOTU_beta_pa_plot <- ggplot(data = zOTU_beta_avg) +
+  geom_point(aes(y = mean_bray_pa, x = avgElevation, size = nSharedOTUs), pch = 21, fill = "white") +
+  labs(y = "Average zOTU dissimilarity", x = "Mean elevation (m)") +
+  guides(size = guide_legend(title = "Number of\nshared OTUs")) +
+  #geom_smooth(aes(y = mean_bray_pa, x = avgElevation), method = "lm", colour = "grey20", data = zOTU_beta_avg) +
+  annotate(geom = "text", 
+           label = paste("rho==",
+                         as.character(round(mean_bray_corr_pa$estimate, 2)),
+                         ifelse(mean_bray_corr_pa$p.value < 0.05, "~'*'", "")),
+           x = Inf, y = -Inf, hjust = 1, vjust = 0, size = 6,
+           colour = "black", parse = T) +
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = c(0.15, 0.75),
+        legend.background = element_rect(color= "grey20"))
+
 # Combine plots (Fig 3) =======
 distance_plot <- 
-  plot_grid(
-    plot_grid(nmds_bray_plot + coord_fixed() + theme(legend.position = "right"),
-              elevation_dist_plot,
-              labels = c("a","b"), label_size = 18, rel_widths = c(1, 0.8)),
-    elevation_dist_taxon_plot, nrow = 2, labels = c("","c"), label_size = 18, rel_heights = c(0.8, 1))
-ggsave(distance_plot, filename = file.path(fig.dir, "distance_plot.pdf"), width = 10, height = 10)
+  plot_grid(plotlist = 
+    list(nmds_bray_plot + coord_fixed() + theme(legend.position = "right"),
+         elevation_dist_plot,
+         zOTU_beta_plot),
+  labels = c("(a)","(b)","(c)"), label_size = 18, rel_widths = c(1, 0.8, 0.8), nrow = 1, align = "ht")
+ggsave(distance_plot, filename = file.path(fig.dir, "distance_plot.pdf"), width = 15, height = 4.5)
 
 # Bray-curtis for presence-absence (Fig S5) =======
 distancepa_plot <- 
-  plot_grid(
-    plot_grid(nmds_bray_pa_plot + coord_fixed() + theme(legend.position = "right"),
-              elevation_distpa_plot, labels = c("a","b"), label_size = 18, rel_widths = c(1, 0.8)),
-    elevation_distpa_taxon_plot, nrow = 2, labels = c("","c"), label_size = 18, rel_heights = c(0.8, 1))
-ggsave(distancepa_plot, filename = file.path(fig.dir, "distancepa_plot.pdf"), width = 10, height = 10)
+  plot_grid(plotlist = 
+              list(nmds_bray_pa_plot + coord_fixed() + theme(legend.position = "right"),
+                   elevation_distpa_plot,
+                   zOTU_beta_pa_plot),
+            labels = c("(a)","(b)","(c)"), label_size = 18, rel_widths = c(1, 0.8, 0.8), nrow = 1, align = "ht")
+ggsave(distancepa_plot, filename = file.path(fig.dir, "distancepa_plot.pdf"), width = 15, height = 4.5)
+
+# Combine order-level dissimilarity plots (Fig S6) =======
+bray_weighted_lab <- ggdraw() + draw_label("Abundance-weighted", vjust = 0, size = 14, fontface = "bold") + theme(plot.margin = unit(c(0, -2, 0, 0), "cm"))
+bray_unweighted_lab <- ggdraw() + draw_label("Unweighted", vjust = 0, size = 14, fontface = "bold") + theme(plot.margin = unit(c(0, -2, 0, 0), "cm"))
+bray_taxon <- plot_grid(
+  plotlist = list(bray_weighted_lab,
+                  elevation_dist_taxon_plot,
+                  bray_unweighted_lab,
+                  elevation_distpa_taxon_plot),
+  nrow = 4, labels = c("(a)", "", "(b)", ""),
+  rel_heights = c(0.1, 1, 0.1, 1))
+ggsave(file.path(fig.dir,"bray_taxon.pdf"), bray_taxon, width = 10, height = 12)
 
 ## RESISTANCE ANALYSIS ====================
 resist <- read_excel(file.path(res.dir, "jairo_resistance_09072020.xlsx"))

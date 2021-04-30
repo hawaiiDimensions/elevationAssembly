@@ -29,7 +29,6 @@ stainback_siteIDs <- subset(siteData, site.1 == "Stainback")$site.id
 otu_native_files <- list.files(file.path(data.dir, "OTU_native"))
 OTU_mat_list <- lapply(otu_native_files, FUN = function(x){readRDS(file.path(data.dir, "OTU_native", x))})
 
-
 # Import taxonmic reference
 taxonData <- readRDS(file.path(data.dir, "taxonData.rds"))
 OTUtaxonData <- taxonData[c("OTU_ID", "V4")]
@@ -86,19 +85,18 @@ allOTUs <- unique(as.vector(subset(OTU_mat_df3, nReads > 0)$OTU_ID))
 laupOTUs <- unique(as.vector(subset(OTU_mat_df3, site == "Laupahoehoe" & nReads > 0)$OTU_ID))
 stnbkOTUs <- unique(as.vector(subset(OTU_mat_df3, site == "Stainback" & nReads > 0)$OTU_ID))
 
-length(allOTUs)
-length(laupOTUs)
-length(stnbkOTUs)
-length(union(laupOTUs, stnbkOTUs))
+length(laupOTUs) # 584 otus
+length(stnbkOTUs) # 584 otus
+length(allOTUs) # 697 OTUs
+length(union(laupOTUs, stnbkOTUs)) # 697 OTUs
 
-laupEndemicOTUs <- laupOTUs[!laupOTUs %in% stnbkOTUs]
-stnbkEndemicOTUs <- stnbkOTUs[!stnbkOTUs %in% laupOTUs]
+laupEndemicOTUs <- laupOTUs[!laupOTUs %in% stnbkOTUs] #113
+stnbkEndemicOTUs <- stnbkOTUs[!stnbkOTUs %in% laupOTUs] # 113
 
 laupEndemicOTUs %in% stnbkEndemicOTUs
 stnbkEndemicOTUs %in% laupEndemicOTUs
 
 calculateRichness <- function(x){
-  
   elevation <- x$elevation[1]
   # Calculate number of unique OTUs as a proxy for species richness
   OTU_list <- unique(as.vector(x$OTU_ID))
@@ -180,10 +178,11 @@ site_nmds_bray_pa_df2 <- merge(site_nmds_bray_pa_df, siteData)
 write.csv(site_nmds_bray_pa_df2, file.path(res.dir, "site_bray_pa_nmds.csv"), row.names = F)
 
 # Calculate beta-diversity over elevation
-# x <- matrix(c(1,2,3,4), nrow = 2)
-# apply(x, MARGIN = 2, FUN = function(x) { x / max(x) } )
-spider_inv_otu <- ara_invasives_otu$V2[ara_invasives_otu$status == "invasive"]
-OTU_mat_avg_subset <- OTU_mat_avg_subset[,!colnames(OTU_mat_avg_subset) %in% spider_inv_otu]
+# RUn the commented lines if you want to exclude invasives
+# invasive_class <- read.delim(file.path(data.dir, "AllInvasiveTaxa.txt"), header = FALSE)
+# invasive_otus <- unique(invasive_class$V3)
+# sum(colnames(OTU_mat_avg_subset) %in% invasive_otus) # 42 invasive OTUs
+# OTU_mat_avg_subset <- OTU_mat_avg_subset[,!colnames(OTU_mat_avg_subset) %in% invasive_otus]
 
 elev_bray_all <- as.matrix(vegdist(OTU_mat_avg_subset, method = "bray", diag = T, upper = T))
 elev_braypa_all <- as.matrix(vegdist(OTU_mat_avg_subset, method = "bray", diag = T, upper = T, binary = T))
@@ -202,9 +201,16 @@ elev_braypa_coleoptera <- as.matrix(vegdist(OTU_mat_avg_subset[,colnames(OTU_mat
 elev_braypa_orthoptera <- as.matrix(vegdist(OTU_mat_avg_subset[,colnames(OTU_mat_avg_subset) %in% subset(taxonData, V4 == "Orthoptera")$OTU_ID], method = "bray", diag = T, upper = T, binary = T))
 elev_braypa_psocoptera <- as.matrix(vegdist(OTU_mat_avg_subset[,colnames(OTU_mat_avg_subset) %in% subset(taxonData, V4 == "Psocoptera")$OTU_ID], method = "bray", diag = T, upper = T, binary = T))
 
+# library(betapart)
+# elev_betapart <- beta.pair(as.data.frame(decostand(OTU_mat_avg_subset, method = "pa")))
+# elev_sorenturnover <- as.matrix(elev_betapart$beta.sne)
+# elev_sorennested <- as.matrix(elev_betapart$beta.sim)
+
 xy <- t(combn(colnames(elev_bray_all), 2)) # this removes backward comparisons
 
 distDF <- data.frame(xy,
+                     #elev_sorenturnover = elev_sorenturnover[xy],
+                     #elev_sorennested = elev_sorennested[xy],
                      bc_all= elev_bray_all[xy], 
                      bcpa_all = elev_braypa_all[xy],
                      bc_araneae = elev_bray_araneae[xy],
@@ -222,14 +228,6 @@ distDF <- data.frame(xy,
 distDF2 <- merge(x = distDF, y = siteData[, c("site.id", "elevation", "site")], by.x = "X1", by.y = "site.id")
 distDF3 <- merge(x = distDF2, y = siteData[, c("site.id", "elevation", "site")], by.x = "X2", by.y = "site.id", suffixes = c("_X1", "_X2"))
 write.csv(distDF3, file = file.path(res.dir, "elevation_dist.csv"), row.names = F)
-
-distDF3$meanElev <- apply(distDF3[,c("elevation_X1", "elevation_X2")], MARGIN = 1, FUN = mean)
-ggplot(data = subset(distDF3, site_X1 != site_X2 & abs(elevation_X1 - elevation_X2) <= 100))+ 
-  geom_point(aes(y = bc_all, x = meanElev))
-
-ggplot(data = subset(distDF3, site_X1 != site_X2 & abs(elevation_X1 - elevation_X2) <= 100))+ 
-  geom_point(aes(y = bc_all, x = bcpa_all))
-
 
 # Average dissimilarity within sites and between sites
 sum(!laupahoehoe_siteIDs %in% lowsiteids) # 23 sites
@@ -252,8 +250,6 @@ distDF3_subset <- subset(distDF3, abs(distDF3$elevation_X1 - distDF3$elevation_X
 distDF3_subset$avgElevation <- rowMeans(distDF3_subset[,c("elevation_X1", "elevation_X2")])
 distDF3_subset_compare <- subset(distDF3_subset, site_X1 != site_X2)
 
-
-# 
 test.labels <- c("All Orders", "Araneae", "Hemiptera",
                  "Lepidoptera", "Coleoptera", "Orthoptera", 
                  "Psocoptera", "All Orders (PA)", "Araneae (PA)", "Hemiptera (PA)",
@@ -284,7 +280,155 @@ cor.test(distDF3_subset_compare$bc_coleoptera, distDF3_subset_compare$bcpa_coleo
 cor.test(distDF3_subset_compare$bc_orthoptera, distDF3_subset_compare$bcpa_orthoptera)
 cor.test(distDF3_subset_compare$bc_psocoptera, distDF3_subset_compare$bcpa_psocoptera) # not correlated
 
-## NICHE CONSERVATISM =========
+## ZOTU BETA DIVERSITY PATTERNS =============
+zotu_native_files <- list.files(file.path(data.dir, "zOTU_native"))
+zOTU_mat_list <- lapply(zotu_native_files, FUN = function(x){readRDS(file.path(data.dir, "zOTU_native", x))})
+
+# Combine list into a single dataframe
+zOTU_mat_df <- melt(zOTU_mat_list, varnames = c("zOTU_ID", "site.id"),
+                    value.name = "nReads")
+zOTU_mat_df2 <- zOTU_mat_df[!zOTU_mat_df$site.id %in% (lowsiteids),]
+
+# Merge with taxonomic information
+zOTU_mat_df_taxon <- merge(zOTU_mat_df2, taxonData[c("OTU_ID", "zOTU_ID", "V4")], by = "zOTU_ID")
+
+# Only include the six focal orders
+zOTU_mat_df3 <- subset(zOTU_mat_df_taxon, V4 %in% c("Araneae", "Coleoptera", "Hemiptera", "Lepidoptera", "Psocoptera", "Orthoptera"))
+
+# Calculate mean read abundance across rarefied datasets
+zOTU_avg_df <- ddply(subset(zOTU_mat_df3, nReads > 0), .variables = .(site.id, zOTU_ID),
+                     summarise,
+                     avgRead = mean(nReads),
+                     V4 = V4[1], 
+                     OTU_ID = OTU_ID[1],
+                     .progress = "text")
+
+# Only include OTUs with more than 1 zOTU (this does not change results but overall dissimilarity will be higher)
+# zOTU_taxon_df_subset <- ddply(zOTU_avg_df,
+#                               .variables = .(OTU_ID),
+#                               .fun = function(x){ if(length(unique(x$zOTU_ID)) > 1){ return(x) } else {return(NULL)}})
+
+# Only include OTUs with more than 1 site
+zOTU_taxon_df_subset <- ddply(zOTU_avg_df, .variables= .(OTU_ID),
+                              .fun = function(x){
+                                if(length(unique(as.vector(x$site.id))) > 1){
+                                  return(x)
+                                } else {
+                                  return(NULL)
+                                }} )
+
+# Calculate bray curtis
+zOTU_beta <- ddply(.data = zOTU_taxon_df_subset,
+                   .variables = .(OTU_ID),
+                   .fun = function(x){
+                     #x = subset(zOTU_taxon_df_subset, OTU_ID == "OTU100")
+                     #x = subset(zOTU_taxon_df_subset, OTU_ID == "OTU1003") #this OTU only has one zOTU
+                     OTU_mat <- reshape2::acast(x, formula = site.id~zOTU_ID, value.var = "avgRead", fill = 0)
+                     OTU_mat2 <- OTU_mat[rowSums(OTU_mat) > 0,,drop = FALSE]
+                     
+                     distDF <- expand.grid(rownames(OTU_mat2), rownames(OTU_mat2), stringsAsFactors = FALSE)
+                     beta_mat <- as.matrix(vegdist(OTU_mat2, method = "bray", diag = T, upper = T))
+                     beta_pamat <- as.matrix(vegdist(OTU_mat2, method = "bray", diag = T, upper = T, binary = T))
+                     distDF$bray <- as.vector(beta_mat)
+                     distDF$braypa <- as.vector(beta_pamat)
+                     #distDF <- melt(beta_mat, value.name = "haplo_bray")
+                     return(distDF)
+                   })
+
+# Remove the reverse pairwise comparisons
+zOTU_beta2 <- ddply(zOTU_beta, .variables = .(OTU_ID), .fun = function(x){
+  x_sort = t(apply(x[,c("Var1", "Var2")], 1, sort))  
+  x_unique <- x[!duplicated(x_sort), ]
+  x_unique <- subset(x_unique, !Var1 == Var2)
+  return(x_unique)
+})
+zOTU_dist <- merge(x = zOTU_beta2, y = siteData[, c("site.id", "elevation", "site")], by.x = "Var1", by.y = "site.id")
+zOTU_dist2 <- merge(x = zOTU_dist, y = siteData[, c("site.id", "elevation", "site")], by.x = "Var2", by.y = "site.id", suffixes = c("_X1", "_X2"))
+
+zOTU_dist_subset <- subset(zOTU_dist2, abs(elevation_X1 - elevation_X2) <= 100 & site_X1 != site_X2)
+zOTU_dist_subset$avgElevation <- apply(zOTU_dist_subset[,c("elevation_X1", "elevation_X2")], MARGIN = 1, FUN = mean)
+
+dim(zOTU_dist_subset) # 9021 pairwise OTU comparisons
+length(unique(zOTU_dist_subset$OTU_ID)) # 318 unique OTUs
+nrow(zOTU_dist_subset[!duplicated(zOTU_dist_subset[,c("Var1", "Var2")]),]) # 148 site comparisons
+
+# Calculate average bray-curtis of OTUs shared between sites
+zOTU_beta_avg <- ddply(zOTU_dist_subset, .variables = .(Var2,Var1),
+                       .fun = function(x){
+                         #x<- subset(zOTU_dist_subset, Var2 == 521 & Var1 == 693)
+                         nSharedOTUs = length(x$OTU_ID) # number of OTUs compared between sites
+                         #mean_gendist = mean(x$avgdist, na.rm = T)
+                         #mean_stddist = mean(x$stddist, na.rm = T)
+                         mean_bray = mean(x$bray, na.rm = T)
+                         mean_bray_pa = mean(x$braypa, na.rm = T)
+                         elevation_X1 = x$elevation_X1[1]
+                         elevation_X2 = x$elevation_X2[1]
+                         site_X1 = x$site_X1[1]
+                         site_X2 = x$site_X2[1]
+                         avgElevation = x$avgElevation[1]
+                         data.frame(nSharedOTUs, mean_bray, mean_bray_pa,
+                                    elevation_X1, elevation_X2, site_X1, site_X2,
+                                    avgElevation)
+                       })
+saveRDS(zOTU_beta_avg, file.path(res.dir, "zOTU_beta_avg.rds"))
+
+cor.test(x = zOTU_beta_avg$mean_bray, y =  zOTU_beta_avg$avgElevation, method = "spearman", exact = FALSE) # 0.548
+cor.test(x = zOTU_beta_avg$mean_bray_pa, y =  zOTU_beta_avg$avgElevation, method = "spearman", exact = FALSE) # 0.759
+
+# ggplot(data = subset(zOTU_dist_subset, OTU_ID %in% test_set)) + 
+#   geom_point(aes(y = braypa, x = avgElevation, colour = OTU_ID)) +
+#   geom_smooth(aes(y = braypa, x = avgElevation, colour = OTU_ID), se = FALSE, method = "lm") +
+#   theme(legend.position = "none")
+# 
+# library(lme4)
+# elev_mod1 <- lm(bray ~ avgElevation, data = zOTU_dist_subset)
+# AIC(elev_mod1)
+# elev_mod2 <- lmer(bray ~ avgElevation + (1|OTU_ID), data = zOTU_dist_subset)
+# AIC(elev_mod2)
+# summary(elev_mod2)
+# 
+# test_set <- names(table(zOTU_dist_subset$OTU_ID))[table(zOTU_dist_subset$OTU_ID) > 20] # 112 OTUs with more than 10 comparisons
+# elev_mod3 <- lmer(bray ~ avgElevation + (1|OTU_ID) + (avgElevation|OTU_ID), data = subset(zOTU_dist_subset, OTU_ID %in% test_set))
+# AIC(elev_mod3)
+
+## INVASIVE SPECIES =============
+#testdata <- subset(OTU_mat_df3, nReads >0 & V4 == "Araneae" & L1 == 1)
+#spider_inv_otu <- ara_invasives_otu$V2[ara_invasives_otu$status == "invasive"]
+#OTU_mat_avg_subset <- OTU_mat_avg_subset[,!colnames(OTU_mat_avg_subset) %in% spider_inv_otu]
+ara_invasives <- read.table(file.path(data.dir,"InvasiveAraneae.txt"))
+length(unique(ara_invasives$V2))
+
+subset(invasive_class, V3 == "OTU765")
+subset(taxonData, OTU_ID =="OTU765")
+
+invasive_class[invasive_class$V9 == "Trombidiformes",]
+OTU_mat_avg_df
+
+length(unique(taxonData$OTU_ID))
+head(invasive_class)
+length(unique(invasive_class$V3))
+head
+
+invasive_otu_class <- ddply(.data = invasive_class,
+                           .variables = .(V2),
+                           summarise,
+                           status =  names(which.max(table(V13))))
+
+testdata2 <- merge(x= testdata, y = ara_invasives_otu, by.x ="OTU_ID", by.y = "V2", all.x = TRUE)
+testdata3 <- ddply(testdata2, .variables = .(site.id), .fun =  function(x){
+  temp <- tapply(INDEX = x$status, X = x$nReads, FUN = sum)
+  temp2 <- temp/ sum(x$nReads)
+  data.frame(status = names(temp), prop = temp2)
+})
+
+invasive_plot <- ggplot(data = testdata3) + geom_bar(aes(fill = factor(status), x = factor(site.id), weight = prop)) + theme(axis.text = element_text(angle = 90))
+ggsave("~/Dropbox/projects/2017/hawaiiCommunityAssembly/elevationAssemblyHawaii/manuscript/invasive_plot.pdf", invasive_plot, width = 10, height = 4)
+
+
+
+
+
+## NICHE CONSERVATISM =============
 siteData2 <- subset(siteData, !site.id %in% lowsiteids)
 site_temprange <- tapply(siteData2$t_ann, siteData2$site, range)
 site_pptrange <- tapply(siteData2$rf_ann, siteData2$site, range)
@@ -507,24 +651,3 @@ round(mean(rf_med_corr_t5_subset$cor), 2)
 round(range(rf_med_corr_t5_subset$cor), 2)
 sum(rf_med_corr_t5_subset$p < 0.05) / 100
 round(range(rf_med_corr_t5_subset$n), 1)
-
-
-## INVASIVE SPECIES
-testdata <- subset(OTU_mat_df3, nReads >0 & V4 == "Araneae" & L1 == 1)
-ara_invasives <- read.table("~/Dropbox/projects/2017/hawaiiCommunityAssembly/elevationAssemblyHawaii/manuscript/Araneae.Tax.txt")
-
-ara_invasives_otu <- ddply(.data = ara_invasives,
-      .variables = .(V2),
-      summarise,
-      status =  names(which.max(table(V11))))
-
-testdata2 <- merge(x= testdata, y = ara_invasives_otu, by.x ="OTU_ID", by.y = "V2", all.x = TRUE)
-testdata3 <- ddply(testdata2, .variables = .(site.id), .fun =  function(x){
-  temp <- tapply(INDEX = x$status, X = x$nReads, FUN = sum)
-  temp2 <- temp/ sum(x$nReads)
-  data.frame(status = names(temp), prop = temp2)
-})
-
-invasive_plot <- ggplot(data = testdata3) + geom_bar(aes(fill = factor(status), x = factor(site.id), weight = prop)) + theme(axis.text = element_text(angle = 90))
-ggsave("~/Dropbox/projects/2017/hawaiiCommunityAssembly/elevationAssemblyHawaii/manuscript/invasive_plot.pdf", invasive_plot, width = 10, height = 4)
-  
