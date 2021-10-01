@@ -34,6 +34,7 @@ vignettes/*.pdf
 
 # OS files
 .DS_Store
+**/.DS_Store
 
 # Results folder
 results/*
@@ -42,3 +43,5 @@ data/*
 gis/*
 presentation/*
 manuscript/*
+raw/*
+dryad/*
